@@ -1,0 +1,8 @@
+# 不要打包進發佈檔的東西
+**/__pycache__/
+*.pyc
+.cosmos-tree/
+/tmp/
+*.tgz
+cosmos_tree_spec.md
+.claude/

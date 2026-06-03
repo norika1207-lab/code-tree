@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cosmos Tree</title>
+<style>
+  :root { --neon:#4dffb0; --amber:#ffcf4d; --red:#ff6b81; --ink:#9fb0c6; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; }
+  body { font-family:-apple-system,"PingFang TC","Helvetica Neue",system-ui,sans-serif; color:#eaf1fb; background:#060a12; }
+
+  /* 夜空背景 */
+  #sky { position:fixed; inset:0; z-index:0;
+    background:
+      radial-gradient(1100px 760px at 70% 12%, #122138 0%, rgba(18,33,56,0) 60%),
+      radial-gradient(900px 700px at 20% 95%, #0d1f1a 0%, rgba(13,31,26,0) 55%),
+      linear-gradient(180deg, #070c16 0%, #060a12 60%, #04070d 100%); }
+  #stars { position:fixed; inset:0; z-index:0; opacity:.5; }
+  svg#tree { position:fixed; inset:0; z-index:1; display:block; cursor:grab; width:100%; height:100%; }
+  svg#tree:active { cursor:grabbing; }
+
+  .panel { position:fixed; z-index:5; background:rgba(11,17,28,.55);
+    border:1px solid rgba(120,160,220,.18); border-radius:16px;
+    backdrop-filter:blur(18px) saturate(140%); -webkit-backdrop-filter:blur(18px) saturate(140%);
+    box-shadow:0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06); }
+
+  #hud { top:22px; left:22px; padding:16px 20px; min-width:280px; }
+  #hud .brand { display:flex; align-items:center; gap:9px; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--ink); }
+  #hud .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--neon); box-shadow:0 0 14px var(--neon); animation:beat 1.6s ease-in-out infinite; }
+  @keyframes beat { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.65)} }
+  #hud .label { margin-top:13px; font-size:11px; letter-spacing:1px; color:var(--ink); opacity:.6; }
+  #hud .file { margin-top:4px; font-size:19px; font-weight:650; color:#fff; word-break:break-all; text-shadow:0 0 20px rgba(77,255,176,.35); }
+  #hud .file.idle { color:#6b7689; text-shadow:none; }
+  #hud .meta { margin-top:8px; font-size:12px; color:var(--ink); opacity:.8; }
+  #hud .meta b { color:#fff; }
+
+  #legend { bottom:22px; left:22px; padding:12px 15px; display:flex; flex-direction:column; gap:7px; }
+  #legend .row { display:flex; align-items:center; gap:9px; font-size:12px; color:var(--ink); }
+  #legend .sw { width:11px; height:11px; border-radius:50%; }
+
+  #conn { top:22px; right:22px; padding:8px 13px; font-size:12px; display:flex; align-items:center; gap:8px; }
+  #conn .dot { width:8px; height:8px; border-radius:50%; background:#ff6b81; box-shadow:0 0 10px #ff6b81; }
+  #conn.on .dot { background:var(--neon); box-shadow:0 0 10px var(--neon); }
+
+  /* 葉子標籤 */
+  .nlabel { font-size:11px; fill:#d4e4d8; paint-order:stroke; stroke:#060a12; stroke-width:3px; stroke-linejoin:round; pointer-events:none; }
+  .nlabel.active { fill:#fff; font-weight:700; font-size:12.5px; }
+  .dlabel { font-size:10px; fill:#9a8a6f; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; pointer-events:none; }
+  .rootlabel { font-size:13px; font-weight:700; fill:#e7c79a; letter-spacing:1px; paint-order:stroke; stroke:#060a12; stroke-width:3px; pointer-events:none; }
+  /* 摺起來的檔：一顆小光點葉子，點它就展開成卡片 */
+  .dotc { cursor:pointer; }
+  .dotlabel { font-size:10px; fill:#9fb4d6; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; pointer-events:none; }
+
+  /* 檔案 = 一個程式碼視窗方塊 */
+  .fcard { width:210px; height:152px; border-radius:9px; overflow:hidden; cursor:pointer;
+    background:rgba(18,26,42,.98); border:1.5px solid rgba(150,185,235,.55);
+    box-shadow:0 10px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(150,185,235,.12); display:flex; flex-direction:column;
+    transition:border-color .18s, box-shadow .18s, transform .18s; }
+  .fcard:hover { border-color:#8fd9ff; box-shadow:0 12px 36px rgba(0,0,0,.62); transform:translateY(-2px); }
+  .fcard .hd { display:flex; align-items:center; gap:7px; padding:6px 9px; flex:0 0 auto;
+    background:rgba(44,58,82,.98); border-bottom:1px solid rgba(150,185,235,.3);
+    font:600 11px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#eef4ff; }
+  .fcard .hd .tl { display:flex; gap:4px; flex:0 0 auto; }
+  .fcard .hd .tl i { width:8px; height:8px; border-radius:50%; display:block; }
+  .fcard .hd .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fcard .hd .badge { margin-left:auto; flex:0 0 auto; font-size:9px; font-weight:700;
+    padding:1px 6px; border-radius:5px; white-space:nowrap; }
+  .fcard .bd { flex:1; overflow:hidden; padding:7px 10px; margin:0;
+    font:9px/1.44 "SF Mono",ui-monospace,Menlo,monospace; color:#93a9c8; white-space:pre; }
+  .fcard.active { border-color:var(--neon); box-shadow:0 0 0 2px var(--neon),0 0 36px rgba(77,255,176,.45); }
+  .fcard.active .badge { background:var(--neon); color:#04130c; }
+  .fcard.modified { border-color:var(--amber); }
+  .fcard.modified .badge { background:var(--amber); color:#241a02; }
+  .fcard.error { border-color:var(--red); box-shadow:0 0 0 2px var(--red),0 0 30px rgba(255,107,129,.5);
+    animation:warn 1s ease-in-out infinite; }
+  .fcard.error .badge { background:var(--red); color:#1a0307; }
+  @keyframes warn { 0%,100%{box-shadow:0 0 0 2px var(--red),0 0 30px rgba(255,107,129,.5)} 50%{box-shadow:0 0 0 2px var(--red),0 0 46px rgba(255,107,129,.9)} }
+  /* 出生序號：哪個先開發、哪個後 */
+  .fcard .hd .seq { flex:0 0 auto; font-size:10px; font-weight:800; color:#9fb4d6;
+    background:rgba(120,160,220,.16); border-radius:5px; padding:1px 6px; letter-spacing:.3px; }
+  .fcard.first .hd .seq { background:#d8a24a; color:#1a1205; box-shadow:0 0 12px rgba(216,162,74,.8); }
+  /* 影響半徑：滑過一格，標出改它會連累誰 */
+  .fcard.epicenter { border-color:#5fd0ff !important; box-shadow:0 0 0 2px #5fd0ff,0 0 30px rgba(95,208,255,.55) !important; }
+  .fcard.atrisk { border-color:#ff9d4d !important; box-shadow:0 0 0 2px rgba(255,157,77,.85),0 0 22px rgba(255,157,77,.4) !important; }
+  .fcard.faded { opacity:.32 !important; }
+  /* 焦點即一切（學 Sourcetrail）：有正在動的格時，跟它無關的退到背景，眼睛直接落在「你在哪」 */
+  .fcard.defocus { opacity:.34; filter:saturate(.55); }
+  .dot.defocus { opacity:.3; }
+  path.blastline { stroke:#ff9d4d; stroke-width:2.5; fill:none; stroke-opacity:.9; stroke-dasharray:6 5; }
+  #blast { left:50%; top:20px; transform:translateX(-50%); padding:9px 16px; font-size:13px;
+    color:#ffd0a0; border-color:rgba(255,157,77,.4); display:none; }
+  #blast.on { display:block; }
+
+  /* 問題雷達：把樹上所有異常收進一張清單，點一下就飛過去修 */
+  #radar { right:22px; bottom:22px; width:280px; max-height:46vh; padding:0; display:none;
+    flex-direction:column; overflow:hidden; }
+  #radar.on { display:flex; }
+  #radar .rhd { flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:11px 15px;
+    font-size:12px; letter-spacing:1px; color:var(--ink); border-bottom:1px solid rgba(120,160,220,.16); }
+  #radar .rhd .rdot { width:8px; height:8px; border-radius:50%; background:var(--red);
+    box-shadow:0 0 10px var(--red); animation:beat 1.6s ease-in-out infinite; }
+  #radar .rhd b { color:#fff; font-weight:700; }
+  #radar .rlist { flex:1; overflow-y:auto; padding:6px; display:flex; flex-direction:column; gap:5px; }
+  #radar .ritem { cursor:pointer; padding:8px 10px; border-radius:9px; border:1px solid rgba(120,160,220,.14);
+    background:rgba(20,28,44,.6); transition:border-color .15s, background .15s; }
+  #radar .ritem:hover { border-color:var(--red); background:rgba(40,24,30,.7); }
+  #radar .ritem .rname { font:600 12px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#fff;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #radar .ritem .rwhy { margin-top:3px; font-size:11px; color:#ffb0bd; }
+  #radar .ritem .rdir { font-size:10px; color:var(--ink); opacity:.7; }
+  /* hotspot：churn×coupling 都高的格，最危險，排最上面也要最醒目 */
+  #radar .ritem.hot { border-color:rgba(255,157,77,.55); background:rgba(46,28,16,.7); }
+  #radar .ritem.hot:hover { border-color:#ff9d4d; }
+  #radar .ritem.hot .rname { color:#ffd0a0; }
+  #radar .ritem.hot .rwhy { color:#ffc78a; }
+
+  /* 切進格子的 code 面板 */
+  #cell { position:fixed; inset:0; z-index:20; display:none; flex-direction:column;
+    background:rgba(6,10,18,.82); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  #cell.show { display:flex; }
+  #cellbar { display:flex; align-items:center; gap:14px; padding:16px 22px; border-bottom:1px solid rgba(120,160,220,.16); }
+  #cellbar .back { cursor:pointer; font-size:13px; color:var(--ink); border:1px solid rgba(120,160,220,.25); border-radius:9px; padding:6px 12px; }
+  #cellbar .back:hover { color:#fff; border-color:var(--neon); }
+  #cellbar .p { font-size:16px; font-weight:650; color:#fff; }
+  #cellbar .s { font-size:12px; color:var(--ink); }
+  #cellcode { flex:1; overflow:auto; margin:0; padding:20px 24px;
+    font:13px/1.6 "SF Mono",ui-monospace,Menlo,monospace; color:#d6e2f2; white-space:pre; tab-size:2; }
+  #cellcode .ln { color:#46566c; }
+  #cellpreview { flex:1; border:0; width:100%; background:#fff; }
+  #cellbar .tabs { margin-left:auto; display:flex; gap:4px; background:rgba(120,160,220,.1); border-radius:9px; padding:3px; }
+  #cellbar .tab { cursor:pointer; font-size:12px; color:var(--ink); border-radius:7px; padding:5px 12px; user-select:none; }
+  #cellbar .tab.on { background:var(--neon); color:#04130c; font-weight:650; }
+  #cellbar .tab[hidden] { display:none; }
+</style>
+</head>
+<body>
+  <div id="sky"></div>
+  <canvas id="stars"></canvas>
+  <svg id="tree"></svg>
+
+  <div id="hud" class="panel">
+    <div class="brand"><span class="dot"></span> Cosmos Tree</div>
+    <div class="label">Now editing</div>
+    <div class="file idle" id="curFile">Not started yet</div>
+    <div class="meta" id="curMeta">Each block is a file, each line is a dependency between files. Touch a file and it lights up here. Click any block to see its code.</div>
+  </div>
+
+  <div id="legend" class="panel">
+    <div class="row"><span class="sw" style="background:#4dffb0;box-shadow:0 0 8px #4dffb0"></span> Active now</div>
+    <div class="row"><span class="sw" style="background:#ffcf4d"></span> Modified</div>
+    <div class="row"><span class="sw" style="background:#ff6b81"></span> Repeated edits · anomaly</div>
+    <div class="row"><span class="sw" style="background:#86b8a0"></span> Untouched</div>
+  </div>
+
+  <div id="conn" class="panel"><span class="dot"></span><span id="connText">Connecting…</span></div>
+  <div id="blast" class="panel"></div>
+
+  <div id="radar" class="panel">
+    <div class="rhd"><span class="rdot"></span>Issue radar · <b id="radarCount">0</b> to review</div>
+    <div class="rlist" id="radarList"></div>
+  </div>
+
+  <div id="cell">
+    <div id="cellbar">
+      <span class="back" id="cellBack">← Back to tree</span>
+      <span class="p" id="cellPath"></span>
+      <span class="s" id="cellStat"></span>
+      <span class="tabs" id="cellTabs">
+        <span class="tab on" id="tabCode">Code</span>
+        <span class="tab" id="tabPrev" hidden>Preview</span>
+      </span>
+    </div>
+    <pre id="cellcode"></pre>
+    <iframe id="cellpreview" hidden></iframe>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script>
+  const WS_PORT = window.__WS_PORT__ || 7778;
+  // idle 用一個會發光的鼠尾草綠，讓還沒碰的檔案像葉子，不是黑點
+  const COLOR = { idle:'#86b8a0', active:'#4dffb0', modified:'#ffcf4d', error:'#ff6b81' };
+  let projectName = 'Project';
+
+  // ── 星點背景 ──
+  (function stars(){
+    const c=document.getElementById('stars'), x=c.getContext('2d');
+    function draw(){ c.width=innerWidth; c.height=innerHeight; x.clearRect(0,0,c.width,c.height);
+      for(let i=0;i<160;i++){ const r=Math.random()*1.3; x.globalAlpha=Math.random()*.6+.2;
+        x.fillStyle='#cfe0ff'; x.beginPath(); x.arc(Math.random()*c.width,Math.random()*c.height,r,0,7); x.fill(); } }
+    draw(); addEventListener('resize',draw);
+  })();
+
+  const TRUNK = 168;       // 地面到第一次分岔的主幹長度：先有明確樹幹，再分枝
+  const CARD_W = 210, CARD_H = 152;   // 每個檔案 = 一個程式碼視窗方塊的尺寸
+  const svg = d3.select('#tree');
+  const scene = svg.append('g');
+  const gTrunk = scene.append('g');
+  const gLinks = scene.append('g');
+  const gBlast = scene.append('g');   // 影響半徑：hover 時畫的依賴線（在分枝之上、卡片之下）
+  const gDots = scene.append('g');    // 大 repo 時：沒在焦點裡的檔摺成小光點，省得幾千張卡片擠爆
+  const gNodes = scene.append('g');
+  const gFlow = scene.append('g');    // 切換時的光球：從上一格沿線流到這一格，畫在最上層
+
+  // 發光濾鏡
+  const defs = svg.append('defs');
+  const glow = defs.append('filter').attr('id','leafglow').attr('x','-80%').attr('y','-80%').attr('width','260%').attr('height','260%');
+  glow.append('feGaussianBlur').attr('stdDeviation','3').attr('result','b');
+  const fm = glow.append('feMerge'); fm.append('feMergeNode').attr('in','b'); fm.append('feMergeNode').attr('in','SourceGraphic');
+
+  let activePath=null, userMoved=false, lastLeafCount=-1, curScale=1;
+  const posByPath=new Map(), cellByPath=new Map();
+
+  // ── 細節分級（LOD）：小專案全展開成卡片；大 repo 只展開焦點附近＋熱點，其餘摺成小光點 ──
+  // 為什麼：真實 repo 幾千個檔，每個都畫 210px 卡片會擠爆、也沒人看得完。
+  // 你真正在乎的永遠是「現在在哪、剛走過哪、誰會連環炸」，那些展開；遠的先收成葉子。
+  const LOD_THRESHOLD = 40;        // 檔數超過這個才啟動摺疊
+  const RECENT_KEEP = 6;           // 保留最近走過的幾格當卡片
+  const recent = [];               // 最近 active 過的路徑（足跡，新的在前）
+  const manualExpand = new Set();  // 手動點開的小光點 → 釘成卡片
+
+  const zoom = d3.zoom().scaleExtent([0.12,4]).on('zoom', e => {
+    scene.attr('transform', e.transform);
+    if(e.sourceEvent) userMoved=true;   // 只有人手動拉才標記，程式置中不算
+  });
+  svg.call(zoom).on('dblclick.zoom', null);
+
+  function statusColor(c){
+    if(c.anomaly==='repeat' || c.status==='error') return COLOR.error;
+    if(c.status==='modified') return COLOR.modified;
+    if(c.status==='active') return COLOR.active;
+    return COLOR.idle;
+  }
+
+  function keyOf(d){
+    return d.data.cell ? ('f:'+d.data.cell.path)
+      : ('d:'+d.data.name+'@'+d.depth+'_'+(d.parent?d.parent.data.name:'root'));
+  }
+
+  // 卡片狀態：紅（異常）> 綠（AI 正在這格動）> 黃（這輪改過）
+  function cardState(c){
+    if(c.anomaly==='repeat' || c.status==='error' || c.anomaly==='stall') return ' error';
+    if(c.path===activePath || c.status==='active') return ' active';
+    if(c.status==='modified' || c.modification_count) return ' modified';
+    return '';
+  }
+  function cardBadge(c){
+    if(c.anomaly==='repeat') return '⚠ Repeated '+(c.modification_count||'');
+    if(c.anomaly==='stall') return '⚠ Stalled';
+    if(c.status==='error') return '⚠ Error';
+    if(c.path===activePath || c.status==='active') return 'AI here';
+    if(c.status==='modified' || c.modification_count) return 'Modified';
+    return '';
+  }
+  // 每個方塊裡顯示的真實程式碼（抓 /file，存快取；檔案改了就讓它重抓）
+  const contentByPath=new Map();
+  function fetchContent(p, cb){
+    fetch('/file?path='+encodeURIComponent(p)).then(r=>r.text()).then(t=>{ contentByPath.set(p,t); cb&&cb(t); }).catch(()=>{});
+  }
+  function clip(t){ return (t||'').replace(/\t/g,'  ').split('\n').slice(0,16).join('\n'); }
+
+  function buildHierarchy(cells, rootName){
+    const root={name:rootName,children:[],dir:true};
+    const dirs=new Map([['',root]]);
+    for(const c of cells){
+      const parts=c.path.split('/'); let cur='', parent=root;
+      parts.forEach((part,i)=>{
+        const leaf=i===parts.length-1; const key=cur?cur+'/'+part:part;
+        if(leaf){ parent.children.push({name:part,cell:c,dir:false}); }
+        else { let n=dirs.get(key); if(!n){ n={name:part,children:[],dir:true}; dirs.set(key,n); parent.children.push(n);} parent=n; }
+        cur=key;
+      });
+    }
+    return root;
+  }
+
+  function branchPath(s,t){
+    // 垂直偏壓：離開來源時先貼著垂直往上，接近目標再外擴，看起來才像樹枝不是噴泉
+    const dy=t.y-s.y;
+    const c1y=s.y+dy*0.5;
+    const c2y=t.y-dy*0.18;
+    return `M${s.x},${s.y} C${s.x},${c1y} ${t.x},${c2y} ${t.x},${t.y}`;
+  }
+
+  const COL_W = CARD_W + 70;     // 同一層裡卡片的水平間距
+  const TIER_H = CARD_H + 160;   // 層與層的垂直間距
+  const TIER_GAP = 140;          // 主幹頂到第一層的距離
+  let lastPlaced = null, lastEdges = [];
+
+  // 依「功能類別」分層：同類同層；被越多檔案依賴的類別排越低（越靠主幹）
+  function layout(cells, edges){
+    const idToCat = new Map(cells.map(c=>[c.id, c.category||'root']));
+    const byCat = new Map();
+    for(const c of cells){ const k=c.category||'root'; (byCat.get(k)||byCat.set(k,[]).get(k)).push(c); }
+    const imp = new Map(); for(const k of byCat.keys()) imp.set(k,0);
+    for(const e of (edges||[])){ const tc=idToCat.get(e.to); if(tc!=null) imp.set(tc,(imp.get(tc)||0)+1); }
+    // tier 0 在底（最基礎/最多人依賴）；往上越周邊
+    const cats = [...byCat.keys()].sort((a,b)=> (imp.get(b)-imp.get(a)) || a.localeCompare(b));
+    const order = [...cells].sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq));
+    const oi = new Map(order.map((c,i)=>[c.id,i]));
+    const placed=[], catMeta=new Map();
+    cats.forEach((cat,ti)=>{
+      const arr = byCat.get(cat).slice().sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq));
+      const n=arr.length, y=-(TIER_GAP+ti*TIER_H);
+      arr.forEach((c,i)=> placed.push({ cell:c, cat, tier:ti, x:(i-(n-1)/2)*COL_W, y, oi:oi.get(c.id)||0 }));
+      catMeta.set(cat, { y, minX:-(n-1)/2*COL_W });
+    });
+    return { placed, cats, catMeta };
+  }
+
+  function render(cells, edges){
+    if(!cells || !cells.length) return;
+    cellByPath.clear(); posByPath.clear();
+    cells.forEach(c=>cellByPath.set(c.path,c));
+    if(edges) lastEdges=edges;
+    // 依賴圖：誰 import 了誰（edge 用絕對路徑，posByPath 用相對路徑，先建 id→rel 映射）
+    const relById=new Map(cells.map(c=>[c.id,c.path]));
+    depMap=new Map(); // rel(被依賴的檔) -> Set(會 import 它、它一壞就連累的檔)
+    for(const e of lastEdges){ const f=relById.get(e.from), t=relById.get(e.to);
+      if(f&&t){ if(!depMap.has(t)) depMap.set(t,new Set()); depMap.get(t).add(f); } }
+    const { placed, cats, catMeta } = layout(cells, lastEdges);
+    lastPlaced=placed;
+    placed.forEach(p=>posByPath.set(p.cell.path,{x:p.x,y:p.y}));
+    // 細節分級：哪些長成卡片、哪些摺成小光點
+    const exp=buildExpanded(cells);
+    const isExp=p=> exp===null || exp.has(p.cell.path);
+    const placedCards=placed.filter(isExp);
+    const placedDots=placed.filter(p=>!isExp(p));
+    const focusSet=focusOf();
+    const defocused=path=> activePath && !focusSet.has(path);  // 有焦點時，無關的退背景
+    const topY = Math.min(...placed.map(p=>p.y));
+    const maxY = Math.max(...placed.map(p=>p.y));  // 最底層（最核心那層）
+    const yGround = maxY + 64;                      // 起點：就在最底層下方一點，不再拖空尾巴
+
+    // ── 起點（種子）→ 主幹 → 中央骨幹（從種子穿上每一層）──
+    // 主幹：從起點短短一截上到最底層，不再有沒接東西的尾巴
+    gTrunk.selectAll('path.trunk').data([0]).join(en=>en.append('path').attr('class','trunk'),u=>u,x=>x.remove())
+      .attr('d',`M0,${yGround} L0,${maxY}`).attr('fill','none').attr('stroke','#6b4423')
+      .attr('stroke-width',26).attr('stroke-linecap','round').attr('stroke-opacity',.97);
+    gTrunk.selectAll('path.spine').data([0]).join(en=>en.append('path').attr('class','spine'),u=>u,x=>x.remove())
+      .attr('d',`M0,${maxY} L0,${topY}`).attr('fill','none').attr('stroke','#6b4423')
+      .attr('stroke-width',11).attr('stroke-linecap','round').attr('stroke-opacity',.82);
+    // 種子：整棵樹的起點，最早的那支程式從這裡發芽
+    gTrunk.selectAll('circle.seed').data([0]).join(en=>en.append('circle').attr('class','seed'),u=>u,x=>x.remove())
+      .attr('cx',0).attr('cy',yGround).attr('r',9)
+      .attr('fill','#d8a24a').attr('stroke','#ffd98a').attr('stroke-width',2)
+      .attr('filter','url(#glow)');
+    gTrunk.selectAll('text.seedlabel').data([0]).join(en=>en.append('text').attr('class','seedlabel'),u=>u,x=>x.remove())
+      .attr('text-anchor','middle').attr('x',0).attr('y',yGround+26)
+      .attr('fill','#c9a35e').attr('font-size',12).text('Root');
+    // 類別名稱：標在每一層左側
+    const cl=gTrunk.selectAll('text.catlabel').data(cats, d=>d);
+    cl.exit().remove();
+    cl.enter().append('text').attr('class','catlabel').merge(cl)
+      .attr('text-anchor','end')
+      .attr('x',d=>catMeta.get(d).minX - CARD_W/2 - 28)
+      .attr('y',d=>catMeta.get(d).y + 5)
+      .text(d=>d);
+
+    // ── 分枝：每張卡片從中央骨幹（它那層下方一點）長出來 ──
+    const lk=gLinks.selectAll('path').data(placed, p=>'f:'+p.cell.path);
+    lk.exit().remove();
+    lk.enter().append('path').merge(lk)
+      .attr('d',p=>branchPath({x:0,y:p.y+74},{x:p.x,y:p.y}))
+      .attr('fill','none').attr('stroke','#7a512e').attr('stroke-opacity',.9)
+      .attr('stroke-linecap','round')
+      .attr('stroke-width',p=>Math.max(2, 9 - p.tier*1.4));
+
+    // ── 檔案 = 程式碼視窗方塊 ──
+    const nd=gNodes.selectAll('g.node').data(placedCards, p=>'f:'+p.cell.path);
+    nd.exit().remove();
+    const ent=nd.enter().append('g').attr('class','node');
+    const fo=ent.append('foreignObject')
+      .attr('width',CARD_W).attr('height',CARD_H)
+      .attr('x',-CARD_W/2).attr('y',-CARD_H/2).style('overflow','visible')
+      .on('click',(e,p)=>openCell(p.cell.path))
+      .on('mouseenter',(e,p)=>highlightBlast(p.cell.path))   // 滑過 → 標出改這格會連累誰
+      .on('mouseleave',clearBlast);
+    const card=fo.append('xhtml:div').attr('class','fcard')
+      // 一個一個長出來：依出生序錯開淡入
+      .style('opacity',0)
+      .style('transition',p=>`opacity .5s ease ${(p.oi||0)*55}ms, border-color .18s, box-shadow .18s, transform .18s`);
+    const hd=card.append('xhtml:div').attr('class','hd');
+    hd.append('xhtml:span').attr('class','seq');   // 出生序號
+    hd.append('xhtml:span').attr('class','tl')
+      .html('<i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>');
+    hd.append('xhtml:span').attr('class','nm');
+    hd.append('xhtml:span').attr('class','badge');
+    card.append('xhtml:pre').attr('class','bd');
+    requestAnimationFrame(()=>ent.selectAll('div.fcard').style('opacity',1)); // 觸發淡入
+
+    const all=ent.merge(nd);
+    all.attr('transform',p=>`translate(${p.x},${p.y})`);
+    all.select('div.fcard').attr('class',p=>'fcard'+cardState(p.cell)+(p.oi===0?' first':'')+(defocused(p.cell.path)?' defocus':''));
+    all.select('.seq').text(p=>'#'+((p.oi||0)+1));
+    all.select('.nm').text(p=>p.cell.path.split('/').pop());
+    all.select('.badge').text(p=>cardBadge(p.cell));
+    all.select('pre.bd').each(function(p){
+      const path=p.cell.path, pre=this;
+      if(contentByPath.has(path)) pre.textContent=clip(contentByPath.get(path));
+      else { if(!pre.textContent) pre.textContent='…'; fetchContent(path, txt=>{ pre.textContent=clip(txt); }); }
+    });
+
+    // ── 摺起來的檔 → 小光點葉子（點它就釘成卡片並打開）──
+    const dn=gDots.selectAll('g.dot').data(placedDots, p=>'d:'+p.cell.path);
+    dn.exit().remove();
+    const den=dn.enter().append('g').attr('class','dot');
+    den.append('circle').attr('class','dotc').attr('r',7)
+      .on('click',(e,p)=>{ manualExpand.add(p.cell.path);
+        const um=userMoved; userMoved=true; render(lastCells); userMoved=um; openCell(p.cell.path); })
+      .on('mouseenter',(e,p)=>highlightBlast(p.cell.path))
+      .on('mouseleave',clearBlast);
+    den.append('text').attr('class','dotlabel').attr('y',20).attr('text-anchor','middle');
+    const dall=den.merge(dn);
+    dall.attr('class',p=>'dot'+(defocused(p.cell.path)?' defocus':''));
+    dall.attr('transform',p=>`translate(${p.x},${p.y})`);
+    dall.select('circle.dotc').attr('fill',p=>statusColor(p.cell))
+      .attr('stroke','#060a12').attr('stroke-width',1.5)
+      .attr('filter',p=>(p.cell.path===activePath||p.cell.status==='active')?'url(#leafglow)':null);
+    dall.select('text.dotlabel').text(p=>p.cell.path.split('/').pop());
+
+    if(!userMoved || cells.length!==lastLeafCount){ fitToView(); }
+    lastLeafCount=cells.length;
+    repaintCards();
+    refreshRadar(cells);
+  }
+
+  // ── 問題雷達：掃出樹上真正該看的格，收成一張清單 ──
+  // 樹用顏色「秀」出問題在哪，雷達把它們「列」出來，點一下就飛過去＋打開那格修。
+  // 這就是「反過頭用視覺化解決開發問題」：結構主動指給你看，你一鍵就到現場。
+  //
+  // 排序的靈魂：churn × coupling（改動頻率 × 耦合度），CodeScene/Tornhill 已驗證的 hotspot 法。
+  // 純看「改了幾次」是雜訊（正常迭代也會改很多次）；改很多次、又被一堆檔依賴的那個，
+  // 才是真正一動就連環炸、會害到全 build 的地方。雷達照這個排，才不會狼來了。
+  const HOT_CHURN = 3, HOT_BLAST = 2;   // 同時跨過才算 hotspot：光改多次不算，光被依賴也不算
+  function radarEntry(c){
+    const churn=c.modification_count||0;
+    const blast=affectedBy(c.path).size;
+    const broken = c.status==='error' || c.anomaly==='repeat';  // core 已判定越線
+    const stall  = c.anomaly==='stall';
+    const hotspot= churn>=HOT_CHURN && blast>=HOT_BLAST;        // churn×coupling 熱點
+    if(!broken && !stall && !hotspot) return null;
+    // 風險分：嚴重度墊底分，再加 churn×blast 的交互項（兩個都高才會被推到最上面）
+    const risk = (broken?1000:0) + (stall?600:0) + churn*10 + blast*25 + churn*blast*14;
+    let why;
+    if(hotspot) why='Edited '+churn+'x and imported by '+blast+' files → one change can cascade';
+    else if(broken) why='Edited '+churn+'x, may be stuck looping on this file';
+    else if(stall) why='Stalled, no progress here';
+    else why='Worth a look';
+    return { cell:c, churn, blast, hotspot, broken, stall, why, risk };
+  }
+  function refreshRadar(cells){
+    const probs=[];
+    for(const c of (cells||[])){ const e=radarEntry(c); if(e) probs.push(e); }
+    probs.sort((a,b)=> b.risk-a.risk);   // 風險高的排最上面
+    const radar=document.getElementById('radar');
+    document.getElementById('radarCount').textContent=probs.length;
+    radar.classList.toggle('on', probs.length>0);
+    const list=document.getElementById('radarList');
+    list.textContent='';
+    for(const pr of probs){
+      const path=pr.cell.path, name=path.split('/').pop();
+      const row=document.createElement('div'); row.className='ritem'+(pr.hotspot?' hot':'');
+      const n=document.createElement('div'); n.className='rname';
+      n.textContent=(pr.hotspot?'[Hotspot] ':'')+name;
+      const w=document.createElement('div'); w.className='rwhy'; w.textContent=pr.why;
+      row.appendChild(n); row.appendChild(w);
+      if(pr.blast){ const d=document.createElement('div'); d.className='rdir';
+        d.textContent='Editing it hits '+pr.blast+' files'; row.appendChild(d); }
+      row.title=path;
+      row.onclick=()=>{ setActive(path); openCell(path); };   // 飛過去 ＋ 打開那格的 code
+      list.appendChild(row);
+    }
+  }
+
+  // Chrome 的老 bug：<foreignObject> 在祖先 <g> 套了 transform 後常常不重繪，
+  // 卡片就變透明看不到。強制 toggle display 逼它重新合成一次。
+  function repaintCards(){
+    requestAnimationFrame(()=>{
+      for(const fo of document.querySelectorAll('foreignObject')){
+        const c=fo.firstElementChild; if(!c) continue;
+        c.style.display='none'; void c.offsetHeight; c.style.display='';
+      }
+    });
+  }
+
+  // ── 細節分級：算出「該展開成卡片」的那一組路徑（其餘摺成小光點）──
+  function isHotspot(c){ return (c.modification_count||0)>=HOT_CHURN && affectedBy(c.path).size>=HOT_BLAST; }
+  function neighborsOf(path){            // 跟這格有直接 import 關聯的檔（兩個方向都算）
+    const out=new Set();
+    for(const d of (depMap.get(path)||[])) out.add(d);          // 誰 import 了它
+    for(const [t,froms] of depMap){ if(froms.has(path)) out.add(t); }  // 它 import 了誰
+    return out;
+  }
+  function buildExpanded(cells){
+    if(cells.length<=LOD_THRESHOLD) return null;   // null = 全展開，小專案不摺
+    const exp=new Set(manualExpand);
+    if(activePath){ exp.add(activePath); for(const n of neighborsOf(activePath)) exp.add(n); }
+    for(let i=0;i<recent.length && i<RECENT_KEEP;i++) exp.add(recent[i]);
+    // 熱點與異常永遠展開：那是你最該盯著的
+    for(const c of cells) if(isHotspot(c) || c.anomaly==='repeat' || c.anomaly==='stall' || c.status==='error') exp.add(c.path);
+    // 還沒開工（沒焦點也沒異常）→ 預設展開最早出生那幾格當門面，第一眼不會是一片空光點
+    if(exp.size===0){
+      const seed=[...cells].sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq)).slice(0,6);
+      for(const c of seed) exp.add(c.path);
+    }
+    return exp;
+  }
+  // 焦點圈：正在動的格 + 它的直接關聯 + 剛走過的足跡。其餘退到背景。
+  function focusOf(){
+    const f=new Set();
+    if(activePath){ f.add(activePath); for(const n of neighborsOf(activePath)) f.add(n);
+      for(let i=0;i<recent.length && i<RECENT_KEEP;i++) f.add(recent[i]); }
+    return f;
+  }
+
+  // ── 影響半徑：改一格 → 哪幾格會被連累 ──
+  let depMap=new Map();
+  // 改 start 這格，所有「直接或間接 import 它」的檔都可能跟著壞
+  function affectedBy(start){
+    const seen=new Set(), q=[start];
+    while(q.length){ const cur=q.shift();
+      for(const d of (depMap.get(cur)||[])){ if(!seen.has(d)){ seen.add(d); q.push(d); } } }
+    return seen;
+  }
+  function highlightBlast(path){
+    const aff=affectedBy(path);
+    gNodes.selectAll('g.node').each(function(p){
+      const card=this.querySelector('.fcard'); if(!card) return;
+      card.classList.remove('epicenter','atrisk','faded');
+      const rp=p.cell.path;
+      if(rp===path) card.classList.add('epicenter');
+      else if(aff.has(rp)) card.classList.add('atrisk');
+      else card.classList.add('faded');
+    });
+    // 畫出會壞掉的依賴鏈（import 方向：受影響的檔 → 它依賴的檔）
+    gBlast.selectAll('*').remove();
+    const inChain=p=>aff.has(p)||p===path;
+    for(const [t,froms] of depMap){ if(!inChain(t)) continue;
+      const b=posByPath.get(t); if(!b) continue;
+      for(const f of froms){ if(!aff.has(f)) continue;
+        const a=posByPath.get(f); if(!a) continue;
+        gBlast.append('path').attr('class','blastline').attr('d',`M${a.x},${a.y} L${b.x},${b.y}`); } }
+    const name=path.split('/').pop();
+    const el=document.getElementById('blast');
+    el.textContent = aff.size
+      ? `Edit ${name} → hits ${aff.size} files (the orange ones)`
+      : `Edit ${name} → nothing imports it, relatively safe to change`;
+    el.classList.add('on');
+  }
+  function clearBlast(){
+    gNodes.selectAll('g.node').each(function(){
+      const card=this.querySelector('.fcard'); if(card) card.classList.remove('epicenter','atrisk','faded'); });
+    gBlast.selectAll('*').remove();
+    document.getElementById('blast').classList.remove('on');
+  }
+
+  // 不把整棵樹硬塞進一個畫面（會把方塊縮到看不見）。
+  // 只用「寬度」決定縮放、夾在可讀區間，相機錨在樹幹底（最新/核心那層），往上滑看更高的層。
+  const MIN_SCALE = 0.62, MAX_SCALE = 1.0;
+  function fitToView(){
+    if(!lastPlaced || !lastPlaced.length) return;
+    const xs=lastPlaced.map(p=>p.x);
+    const x0=Math.min(...xs)-CARD_W/2, x1=Math.max(...xs)+CARD_W/2;
+    const yMax=Math.max(...lastPlaced.map(p=>p.y))+CARD_H/2+90; // 含起點種子那截
+    if(![x0,x1,yMax].every(Number.isFinite)) return;
+    const pad=70;
+    const bw=Math.max(1,(x1-x0))+pad*2;
+    const w=innerWidth||1280, h=innerHeight||800;
+    let s=Math.max(MIN_SCALE, Math.min(MAX_SCALE, w/bw));
+    if(!Number.isFinite(s) || s<=0) s=1; curScale=s;
+    const cx=(x0+x1)/2;
+    // 水平置中於樹幹；垂直把樹幹底放在畫面下緣附近，往上是一層層長出來的方塊
+    const t=d3.zoomIdentity.translate(w/2 - s*cx, h - s*yMax - 70).scale(s);
+    svg.call(zoom.transform, t);
+    repaintCards();
+  }
+
+  function centerOn(path){
+    const p=posByPath.get(path); if(!p) return;
+    const w=innerWidth,h=innerHeight, s=Math.max(curScale,0.8);
+    const t=d3.zoomIdentity.translate(w/2 - s*p.x, h/2 - s*p.y).scale(s);
+    svg.transition().duration(1000).call(zoom.transform,t);
+  }
+
+  // ── 切換時的光球：開發從上一格移到這一格，光球沿著「線」跑過去 ──
+  // 這就是「開發過程」在結構上流動的樣子：方塊=檔案，線=檔案之間的關聯。
+  // 兩格有直接 import 關聯 → 走直連（那就是真實關聯線）；
+  // 沒有 → 沿樹骨架（分枝→主幹→另一條分枝）流，用虛線表示這是跨結構的切換。
+  function hasEdge(p,q){
+    return (depMap.get(p) && depMap.get(p).has(q)) || (depMap.get(q) && depMap.get(q).has(p));
+  }
+  function flowRoute(fromPath, toPath){
+    const a=posByPath.get(fromPath), b=posByPath.get(toPath);
+    if(!a || !b || (a.x===b.x && a.y===b.y)) return null;
+    const direct=hasEdge(fromPath, toPath);
+    // 直連：就是兩格之間那條真實關聯線
+    if(direct) return { d:`M${a.x},${a.y} L${b.x},${b.y}`, direct:true };
+    // 沿骨架：a 的分枝根在 (0, a.y+74)，b 的分枝根在 (0, b.y+74)，中間走主幹（x=0）
+    return { d:`M${a.x},${a.y} L0,${a.y+74} L0,${b.y+74} L${b.x},${b.y}`, direct:false };
+  }
+  function flowBall(fromPath, toPath){
+    const r=flowRoute(fromPath, toPath); if(!r) return;
+    // 1) 痕跡線：把這次走的路徑亮出來，停一下再淡掉
+    const trail=gFlow.append('path').attr('d',r.d).attr('fill','none')
+      .attr('stroke','#4dffb0').attr('stroke-width', r.direct?2.4:1.8)
+      .attr('stroke-linecap','round').attr('stroke-linejoin','round')
+      .attr('stroke-dasharray', r.direct?null:'5 6')
+      .attr('stroke-opacity',0).attr('filter','url(#leafglow)');
+    trail.transition().duration(160).attr('stroke-opacity', r.direct?.9:.5)
+      .transition().delay(360).duration(560).attr('stroke-opacity',0).remove();
+    // 2) 光球：沿同一條路徑跑到新格，抵達時亮一下散開
+    const node=trail.node(), L=node.getTotalLength();
+    const ball=gFlow.append('circle').attr('r',6)
+      .attr('fill','#eafff5').attr('stroke','#4dffb0').attr('stroke-width',2)
+      .attr('filter','url(#leafglow)').attr('transform',`translate(${posByPath.get(fromPath).x},${posByPath.get(fromPath).y})`);
+    ball.transition().duration(680).ease(d3.easeCubicInOut)
+      .attrTween('transform',()=> t => { const p=node.getPointAtLength(L*t); return `translate(${p.x},${p.y})`; })
+      .transition().duration(200).attr('r',11).attr('fill-opacity',0).attr('stroke-opacity',0).remove();
+  }
+
+  function setActive(path){
+    const prev=activePath;
+    activePath=path;
+    // 足跡：把這一格記到最近走過的最前面（去重、限長），讓焦點附近持續展開成卡片
+    const ri=recent.indexOf(path); if(ri>=0) recent.splice(ri,1);
+    recent.unshift(path); if(recent.length>RECENT_KEEP*2) recent.length=RECENT_KEEP*2;
+    if(lastCells) { const um=userMoved; userMoved=true; render(lastCells); userMoved=um; } // 重畫高亮但不被 fit 拉走
+    if(prev && prev!==path) flowBall(prev, path); // render 後位置才在，光球從上一格流到這一格
+    centerOn(path);
+    const c=cellByPath.get(path);
+    const f=document.getElementById('curFile');
+    f.textContent=path; f.classList.remove('idle');
+    if(c){
+      const bits=[`<b>${c.language||''}</b>`, `${c.size_lines||0} lines`];
+      if(c.modification_count) bits.push(`edited <b>${c.modification_count}</b>x`);
+      if(c.anomaly==='repeat') bits.push('<b style="color:#ff6b81">⚠ Repeated edits</b>');
+      document.getElementById('curMeta').innerHTML=bits.join(' · ');
+    }
+  }
+
+  // ── 切進格子：看正在跑的 code ──
+  // 瀏覽器能直接渲染的 UI 檔 → 詳情面板多一個「預覽」分頁
+  function isPreviewable(p){ return /\.(html?|svg)$/i.test(p||''); }
+  function showCellTab(which){
+    const code=document.getElementById('cellcode'), prev=document.getElementById('cellpreview');
+    const tc=document.getElementById('tabCode'), tp=document.getElementById('tabPrev');
+    if(which==='preview'){
+      code.hidden=true; prev.hidden=false; tc.classList.remove('on'); tp.classList.add('on');
+      if(prev.dataset.path) prev.src='/preview/'+prev.dataset.path.split('/').map(encodeURIComponent).join('/');
+    } else {
+      prev.hidden=true; code.hidden=false; tp.classList.remove('on'); tc.classList.add('on');
+    }
+  }
+  async function openCell(path){
+    const c=cellByPath.get(path);
+    document.getElementById('cellPath').textContent=path;
+    document.getElementById('cellStat').textContent = c ? `${c.language||''} · ${c.size_lines||0} lines` : '';
+    const pre=document.getElementById('cellcode'); pre.textContent='Loading…';
+    const prev=document.getElementById('cellpreview'); prev.removeAttribute('src'); prev.dataset.path=path;
+    document.getElementById('tabPrev').hidden=!isPreviewable(path);
+    showCellTab('code'); // 每次點開預設先看程式碼
+    document.getElementById('cell').classList.add('show');
+    try{
+      const r=await fetch('/file?path='+encodeURIComponent(path));
+      const txt=await r.text();
+      pre.textContent=txt;
+    }catch(e){ pre.textContent='Could not read: '+e.message; }
+  }
+  document.getElementById('tabCode').onclick=()=>showCellTab('code');
+  document.getElementById('tabPrev').onclick=()=>showCellTab('preview');
+  document.getElementById('cellBack').onclick=()=>document.getElementById('cell').classList.remove('show');
+  addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('cell').classList.remove('show'); });
+
+  // ── WebSocket ──
+  let lastCells=null;
+  let socket=null;            // WS 連線；保留送訊息的管線備用，畫面本身只負責看
+  function send(obj){ if(socket && socket.readyState===1) socket.send(JSON.stringify(obj)); }
+  function connect(){
+    const ws=new WebSocket(`ws://localhost:${WS_PORT}`);
+    socket=ws;
+    const conn=document.getElementById('conn');
+    ws.onopen=()=>{ conn.classList.add('on'); document.getElementById('connText').textContent='Connected'; };
+    ws.onclose=()=>{ conn.classList.remove('on'); document.getElementById('connText').textContent='Disconnected, reconnecting…'; setTimeout(connect,1500); };
+    ws.onmessage=ev=>{
+      let m; try{ m=JSON.parse(ev.data);}catch{ return; }
+      if(m.type==='state'){
+        if(m.payload && m.payload.root){ const r=m.payload.root.split('/').filter(Boolean); projectName=r[r.length-1]||'Project'; }
+        lastCells=(m.payload&&m.payload.cells)||[]; render(lastCells, (m.payload&&m.payload.edges)||lastEdges);
+      }
+      else if(m.type==='active' && m.payload) setActive(m.payload.path);
+      else if(m.type==='activity' && m.payload && m.payload.action!=='read'){
+        contentByPath.delete(m.payload.path);   // 檔案動了，讓那格重新抓最新 code
+        setActive(m.payload.path);
+      }
+    };
+  }
+  connect();
+
+  addEventListener('resize',()=>{ if(lastPlaced && !userMoved) fitToView(); });
+  </script>
+</body>
+</html>

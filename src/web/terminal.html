@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Code Tree</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<style>
+  :root { --bg:#060a12; --line:rgba(120,160,220,.18); --ink:#9fb0c6; --neon:#4dffb0; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); overflow:hidden;
+    font-family:-apple-system,"PingFang TC",system-ui,sans-serif; color:#eaf1fb; }
+  /* tmux 式切兩塊：左真終端機，右視覺化 */
+  #split { display:flex; width:100vw; height:100vh; }
+  #left { position:relative; flex:1 1 58%; min-width:280px; display:flex; flex-direction:column;
+    background:#05080e; }
+  /* 左邊留 78px 給 macOS 紅綠燈，內容不再被壓在燈號上 */
+  #lbar { flex:0 0 auto; height:38px; display:flex; align-items:center; gap:8px; padding:0 12px 0 78px;
+    font-size:12px; letter-spacing:.5px; color:var(--ink); border-bottom:1px solid var(--line);
+    -webkit-app-region:drag; user-select:none; white-space:nowrap; overflow:hidden; }
+  #lbar .sub { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  #lbar .dot { width:8px; height:8px; border-radius:50%; background:var(--neon); box-shadow:0 0 8px var(--neon); }
+  /* REC：CLI 開著就在錄逐字稿，亮起紅點＋REC，hover 顯示存檔路徑 */
+  #recBadge { margin-left:auto; flex:0 0 auto; display:none; align-items:center; gap:5px;
+    font-size:10px; font-weight:700; letter-spacing:1px; color:#ff7a8a;
+    padding:2px 7px; border:1px solid rgba(255,122,138,.4); border-radius:10px; cursor:default; }
+  #recBadge.on { display:inline-flex; }
+  #recBadge::before { content:''; width:7px; height:7px; border-radius:50%; background:#ff5a6e;
+    box-shadow:0 0 7px #ff5a6e; animation:recblink 1.4s ease-in-out infinite; }
+  @keyframes recblink { 0%,100%{opacity:1} 50%{opacity:.25} }
+  /* 輸入指令上方的 token 列：本次 input / cache 命中 / output / 省下，外加「清掉」歸零 */
+  /* 紅綠燈只在最上面那條,token 列在它下面,左留白回到 12px,不用再讓位 */
+  #tokbar { flex:0 0 auto; height:30px; display:flex; align-items:center; gap:14px;
+    padding:0 12px; font-size:11.5px; letter-spacing:.3px; color:var(--ink);
+    border-bottom:1px solid var(--line); background:#060b14; white-space:nowrap; }
+  /* 數字群放可橫向捲動的容器,窄到爆也不擠掉「清掉」鈕;捲軸隱形 */
+  #tokbar .stats { display:flex; align-items:center; gap:14px; overflow-x:auto; min-width:0; flex:1;
+    scrollbar-width:none; } #tokbar .stats::-webkit-scrollbar { display:none; }
+  #tokbar .tk { display:flex; align-items:baseline; gap:5px; flex:0 0 auto; }
+  #tokbar .tk b { font-weight:600; color:#cfe0ff; font-variant-numeric:tabular-nums; }
+  #tokbar .tk.save b { color:var(--neon); }
+  #tokbar .tk.burn b { color:#ffcf4d; }
+  #tokbar .spacer { flex:1; }
+  /* 不清的代價：平常灰,>0 變琥珀,燒越多越紅 */
+  #tokbar .waste { flex:0 0 auto; padding:2px 9px; border-radius:7px; font-weight:600;
+    font-variant-numeric:tabular-nums; color:#6b7689; border:1px solid var(--line);
+    cursor:default; transition:color .2s, border-color .2s, background .2s; }
+  #tokbar .waste.warn { color:#ffcf4d; border-color:rgba(255,207,77,.5); background:rgba(255,207,77,.08); }
+  #tokbar .waste.hot { color:#ff7a8a; border-color:rgba(255,122,138,.55); background:rgba(255,122,138,.1); }
+  #tokbar button { font:inherit; color:#dbe6f7; background:rgba(120,160,220,.12);
+    border:1px solid var(--line); border-radius:7px; padding:3px 11px; cursor:pointer;
+    transition:border-color .15s, color .15s; }
+  #tokbar button:hover { border-color:var(--neon); color:#fff; }
+  #term { flex:1; min-height:0; padding:6px 8px; }
+  /* 命令列底下這條：看得見的切換專案列，不用躲進系統選單 */
+  #abar { flex:0 0 auto; height:36px; display:flex; align-items:center; gap:10px; padding:0 12px;
+    border-top:1px solid var(--line); background:#070b12; font-size:12px; color:var(--ink); z-index:6; }
+  #abar .proj { display:flex; align-items:center; gap:7px; color:#cfe0ff; min-width:0; max-width:46%; }
+  #abar .proj .pin { width:7px; height:7px; border-radius:50%; flex:0 0 auto;
+    background:var(--neon); box-shadow:0 0 8px var(--neon); }
+  #abar .proj.none .pin { background:#6b7689; box-shadow:none; }
+  #abar .proj .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #abar .spacer { flex:1; }
+  #abar button { font:inherit; color:#dbe6f7; background:rgba(120,160,220,.12);
+    border:1px solid var(--line); border-radius:8px; padding:5px 13px; cursor:pointer;
+    transition:border-color .15s, color .15s; }
+  #abar button:hover { border-color:var(--neon); color:#fff; }
+  #abar button.ghost { background:transparent; }
+  /* 中間可拖的分隔線 */
+  #grip { flex:0 0 6px; cursor:col-resize; background:linear-gradient(180deg,rgba(120,160,220,.05),rgba(120,160,220,.18),rgba(120,160,220,.05)); }
+  #grip:hover { background:rgba(77,255,176,.35); }
+  #right { flex:1 1 42%; min-width:260px; position:relative; border-left:1px solid var(--line); }
+  #right iframe { width:100%; height:100%; border:0; background:var(--bg); display:block; }
+  /* 沒裝 node-pty 時的提示蓋層（底下留 36px 給 action bar，按鈕照樣按得到）*/
+  #need { position:absolute; inset:68px 0 36px 0; display:none; flex-direction:column; gap:14px;
+    align-items:center; justify-content:center; text-align:center; padding:28px; z-index:5; background:#05080e; }
+  #need.show { display:flex; }
+  #need h2 { margin:0; font-size:16px; color:#fff; font-weight:650; }
+  #need p { margin:0; font-size:13px; color:var(--ink); line-height:1.7; max-width:440px; }
+  #need code { background:rgba(120,160,220,.14); padding:3px 8px; border-radius:6px;
+    font:13px/1.5 "SF Mono",ui-monospace,Menlo,monospace; color:var(--neon); }
+  /* MASL 警告 toast：AI(含終端機裡的 claude)自顧自寫出問題時，從這裡跳出來 */
+  #alerts { position:absolute; top:72px; right:12px; left:88px; z-index:7;
+    display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+  #alerts .al { pointer-events:auto; background:rgba(30,10,14,.96); border:1px solid #ff6b81;
+    border-radius:10px; padding:10px 12px; box-shadow:0 6px 22px rgba(0,0,0,.5);
+    font-size:12.5px; line-height:1.55; color:#ffd9df; display:flex; gap:9px; align-items:flex-start;
+    animation:alin .18s ease; }
+  #alerts .al .ic { color:#ff6b81; font-size:14px; line-height:1.3; flex:0 0 auto; }
+  #alerts .al .bd { min-width:0; flex:1; }
+  #alerts .al .bd b { color:#ff9aa9; }
+  #alerts .al .x { pointer-events:auto; cursor:pointer; color:#ff9aa9; flex:0 0 auto;
+    padding:0 2px; opacity:.7; } #alerts .al .x:hover { opacity:1; }
+  @keyframes alin { from{ transform:translateY(-6px); opacity:0; } to{ transform:none; opacity:1; } }
+  /* MASL 動手前關卡：Code Tree 自己的 agent 要改檔/跑指令前，擋下來等你點頭 */
+  #masl { position:absolute; inset:0; z-index:9; display:none;
+    align-items:center; justify-content:center; background:rgba(3,6,12,.78); backdrop-filter:blur(2px); }
+  #masl.show { display:flex; }
+  #masl .card { width:min(78%,460px); background:#0a0f18; border:1px solid #ff6b81;
+    border-radius:14px; padding:18px 18px 16px; box-shadow:0 18px 60px rgba(0,0,0,.6); }
+  #masl .hd { font-size:14px; font-weight:700; color:#ff8a9a; margin:0 0 10px; }
+  #masl .row { font-size:12.5px; color:#cfe0ff; line-height:1.65; margin:3px 0; word-break:break-word; }
+  #masl .row .k { color:var(--ink); }
+  #masl .blast { color:#ffcf4d; }
+  #masl .said { color:#9fb0c6; font-style:italic; }
+  #masl .btns { display:flex; gap:10px; margin-top:14px; }
+  #masl button { flex:1; font:inherit; font-size:13px; border-radius:9px; padding:8px 0; cursor:pointer;
+    border:1px solid var(--line); transition:.15s; }
+  #masl .deny { background:#ff6b81; border-color:#ff6b81; color:#1a0306; font-weight:650; }
+  #masl .deny:hover { background:#ff8193; }
+  #masl .allow { background:transparent; color:#cfe0ff; } #masl .allow:hover { border-color:var(--neon); color:#fff; }
+</style>
+</head>
+<body>
+  <div id="split">
+    <div id="left">
+      <div id="lbar"><span class="dot"></span> Terminal<span class="sub" style="opacity:.5"> · your shell, business as usual</span><span id="recBadge" title="">REC</span></div>
+      <div id="tokbar">
+        <div class="stats">
+          <span class="tk"><span>Input</span><b id="tkIn">0</b></span>
+          <span class="tk"><span>Cache hits</span><b id="tkCache">0</b></span>
+          <span class="tk"><span>Output</span><b id="tkOut">0</b></span>
+          <span class="tk save"><span>Saved</span><b id="tkSave">0</b></span>
+          <span class="tk burn"><span>Burned</span><b id="tkBurn">0</b></span>
+        </div>
+        <span id="tkWaste" class="waste" title="Cost of not clearing your cache over the next hour">Waste $0.00</span>
+        <button id="tkClear">Clear</button>
+      </div>
+      <div id="term"></div>
+      <div id="alerts"></div>
+      <div id="masl">
+        <div class="card">
+          <div class="hd" id="maslHd">⛔ MASL intercept</div>
+          <div id="maslBody"></div>
+          <div class="btns">
+            <button class="deny" id="maslDeny">Block</button>
+            <button class="allow" id="maslAllow">Allow</button>
+          </div>
+        </div>
+      </div>
+      <div id="need">
+        <h2>One thing left: a real shell on the left</h2>
+        <p>The real terminal uses node-pty (the same one VS Code and Hyper ship). Install it once and it comes alive:</p>
+        <p><code>npm install node-pty</code></p>
+        <p>Reopen this page after installing. The left becomes your usual terminal, the world tree grows on the right.</p>
+      </div>
+      <div id="abar">
+        <span class="proj" id="abarProj"><span class="pin"></span><span class="nm" id="abarName">Project</span></span>
+        <span class="spacer"></span>
+        <button id="btnOpen">Open project…</button>
+        <button id="btnNone" class="ghost">No project</button>
+      </div>
+    </div>
+    <div id="grip"></div>
+    <div id="right"><iframe id="viz" src="/viz" title="World tree"></iframe></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script>
+  const WS_PORT = window.__WS_PORT__ || 7778;
+
+  // ── 真終端機（xterm.js）：畫面歸它，shell 在 core 那邊由 node-pty 跑 ──
+  const term = new window.Terminal({
+    fontFamily: '"SF Mono",ui-monospace,Menlo,Monaco,monospace',
+    fontSize: 13, lineHeight: 1.25, cursorBlink: true,
+    theme: { background:'#05080e', foreground:'#eaf1fb', cursor:'#4dffb0',
+      black:'#0b0f17', green:'#4dffb0', yellow:'#ffcf4d', red:'#ff6b81',
+      blue:'#7fb2ff', cyan:'#86e0ff', white:'#cfe0ff' },
+  });
+  const fit = new window.FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('term'));
+  fit.fit();
+
+  let socket = null, started = false;
+  function send(o){ if(socket && socket.readyState===1) socket.send(JSON.stringify(o)); }
+
+  function connect(){
+    const ws = new WebSocket(`ws://localhost:${WS_PORT}`);
+    socket = ws;
+    ws.onopen = () => {
+      fit.fit();
+      send({ type:'pty_start', cols: term.cols, rows: term.rows });
+      started = true;
+    };
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === 'pty_output') term.write(m.data);
+      else if (m.type === 'pty_missing') document.getElementById('need').classList.add('show');
+      else if (m.type === 'pty_exit') { term.write('\r\n\x1b[90m[shell exited]\x1b[0m\r\n'); setRec(null); }
+      else if (m.type === 'session_log' && m.payload) {
+        // CLI 開了就在錄整段逐字稿，亮 REC 並把存檔路徑放進 tooltip
+        setRec(m.payload.file);
+      }
+      else if (m.type === 'gate' && m.payload) {
+        // MASL 動手前關卡：Code Tree 自己的 agent 要改檔/跑指令，先擋下來等你點頭
+        showGate(m.payload);
+      }
+      else if (m.type === 'anomaly' && m.payload) {
+        // 異常警告：反覆改同檔 / 卡住 / 錯誤重複。對終端機裡的 claude 也有效(file watcher 看得到任何 process)
+        showAlert(m.payload);
+      }
+      else if (m.type === 'tokens' && m.payload) {
+        // 輸入指令上方那條：本次這場 claude 對話真實燒掉的 token
+        const f = (n) => (n || 0).toLocaleString('en-US');
+        const p = m.payload;
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = f(v); };
+        set('tkIn', p.input); set('tkCache', p.cacheRead); set('tkOut', p.output);
+        set('tkSave', p.saved); set('tkBurn', p.burned);
+      }
+      else if (m.type === 'savings' && m.payload) {
+        // 不清的代價：現在清掉 cache，接下來一小時大約省這麼多 = 不清就白燒這麼多
+        const el = document.getElementById('tkWaste');
+        if (el) {
+          const usd = m.payload.clearNowUsd || 0;
+          el.textContent = 'Waste $' + usd.toFixed(2);
+          el.classList.toggle('warn', usd >= 0.1 && usd < 1);
+          el.classList.toggle('hot', usd >= 1);
+          el.title = usd > 0
+            ? `Not clearing your cache burns about $${usd.toFixed(2)} over the next hour (${m.payload.nActive} active session(s) holding stale cache)`
+            : 'No stale cache right now, nothing wasted by not clearing';
+        }
+      }
+      else if (m.type === 'project' && m.payload) {
+        // 終端機 cd 進新專案 → 底下那條列的專案名跟著換，點亮綠點
+        const nm = document.getElementById('abarName');
+        const pj = document.getElementById('abarProj');
+        if (nm) nm.textContent = m.payload.label || 'Project';
+        if (pj) pj.classList.remove('none');
+      }
+      // state / active 等視覺化訊息由右邊 iframe 自己那條連線處理，這條只管終端
+    };
+    ws.onclose = () => { started = false; setTimeout(connect, 1500); };
+  }
+  connect();
+
+  // 鍵盤 → shell
+  term.onData((d) => send({ type:'pty_input', data:d }));
+
+  // 視窗 / 分隔線改變 → 重新 fit + 告訴 shell 新尺寸
+  function relayout(){
+    fit.fit();
+    if (started) send({ type:'pty_resize', cols: term.cols, rows: term.rows });
+  }
+  addEventListener('resize', relayout);
+
+  // 中間 grip 拖動：調左右比例
+  (function dragGrip(){
+    const grip = document.getElementById('grip'), left = document.getElementById('left'),
+          right = document.getElementById('right'), split = document.getElementById('split');
+    let dragging = false;
+    grip.addEventListener('mousedown', (e) => { dragging = true; e.preventDefault(); document.body.style.cursor='col-resize'; });
+    addEventListener('mouseup', () => { if(dragging){ dragging=false; document.body.style.cursor=''; relayout(); } });
+    addEventListener('mousemove', (e) => {
+      if(!dragging) return;
+      const total = split.clientWidth, x = Math.max(280, Math.min(e.clientX, total-260));
+      const lp = (x/total*100);
+      left.style.flex = `0 0 ${lp}%`; right.style.flex = `1 1 ${100-lp}%`;
+      fit.fit();
+    });
+  })();
+
+  // 點終端區域就把焦點搶回終端
+  document.getElementById('term').addEventListener('mousedown', () => term.focus());
+  term.focus();
+
+  // token 列「清掉」：叫 core 把目前累計設成新基準，畫面歸零，焦點還給終端
+  (function tokenClear(){
+    const btn = document.getElementById('tkClear');
+    if (!btn) return;
+    btn.onclick = () => { send({ type:'tokens_clear' }); term.focus(); };
+  })();
+
+  // ── MASL 動手前關卡：擋下來，等你按放行 / 擋下 ──
+  let gateId = null;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  // REC 徽章：傳檔名就亮起並把存檔路徑放進 tooltip；傳 null 就熄掉（shell 結束）
+  function setRec(file){
+    const b = document.getElementById('recBadge');
+    if (!b) return;
+    if (file) { b.classList.add('on'); b.title = 'Recording this session to:\n' + file; }
+    else { b.classList.remove('on'); b.title = ''; }
+  }
+
+  function showGate(p){
+    gateId = p.id;
+    const r = p.report || {};
+    const hd = document.getElementById('maslHd');
+    const body = document.getElementById('maslBody');
+    hd.textContent = r.kind === 'shell' ? '⛔ MASL intercept: shell command' : `⛔ MASL intercept: ${r.tool||'edit'} → ${r.targetRel||'(unknown file)'}`;
+    const rows = [];
+    if (r.command) rows.push(`<div class="row"><span class="k">Command: </span>${esc(r.command)}</div>`);
+    if (p.agentSaid) rows.push(`<div class="row said">agent said: ${esc(String(p.agentSaid).slice(0,140))}</div>`);
+    if (r.reason) rows.push(`<div class="row"><span class="k">Impact: </span>${esc(r.reason)}</div>`);
+    if (r.blastCount > 0) rows.push(`<div class="row blast">Hits ${r.blastCount} file(s): ${esc((r.blast||[]).slice(0,6).join(', '))}${r.blastCount>6?` …+${r.blastCount-6}`:''}</div>`);
+    body.innerHTML = rows.join('');
+    document.getElementById('masl').classList.add('show');
+  }
+  function closeGate(approve){
+    if (gateId) send({ type:'gate_reply', id: gateId, approve });
+    gateId = null;
+    document.getElementById('masl').classList.remove('show');
+    term.focus();
+  }
+  document.getElementById('maslDeny').onclick = () => closeGate(false);
+  document.getElementById('maslAllow').onclick = () => closeGate(true);
+
+  // ── 異常警告 toast：自顧自寫出問題時跳出來，可手動關，error/repeat 不自動消 ──
+  function showAlert(p){
+    const wrap = document.getElementById('alerts');
+    const el = document.createElement('div');
+    el.className = 'al';
+    const label = p.rule === 'repeat_modify' ? 'Repeated edits'
+      : p.rule === 'stall' ? 'Stalled'
+      : p.rule === 'error_recurring' ? 'Recurring error' : 'Anomaly';
+    el.innerHTML = `<span class="ic">⚠</span><div class="bd"><b>${esc(label)}</b><br>${esc(p.message||'')}</div><span class="x">✕</span>`;
+    el.querySelector('.x').onclick = () => el.remove();
+    wrap.appendChild(el);
+    // stall 這種比較軟的 12 秒後自動消；反覆改 / 錯誤重複留著要你正視
+    if (p.rule === 'stall') setTimeout(() => el.remove(), 12000);
+    while (wrap.children.length > 5) wrap.firstChild.remove();
+  }
+
+  // ── 底下那條切換專案列 ──
+  (function actionBar(){
+    const proj = document.getElementById('abarProj');
+    const nameEl = document.getElementById('abarName');
+    const btnOpen = document.getElementById('btnOpen');
+    const btnNone = document.getElementById('btnNone');
+    nameEl.textContent = window.__PROJECT_LABEL__ || 'Project';
+    if (window.__NO_PROJECT__ === true) proj.classList.add('none');
+    const bridge = window.codetree;   // 只有桌面 app（Electron preload）才有
+    if (bridge) {
+      btnOpen.onclick = () => bridge.pickProject();
+      btnNone.onclick = () => bridge.openNoProject();
+    } else {
+      // 純瀏覽器開頁：選資料夾需要原生對話框，先把按鈕收起，只留專案名
+      btnOpen.style.display = 'none';
+      btnNone.style.display = 'none';
+    }
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+{
+  "name": "@norikaoda/code-tree",
+  "version": "0.1.0",
+  "description": "Watch your AI coding agent work in real time: a live world-tree of your codebase where the camera follows whatever file the agent touches, with token-waste metering and a safety gate.",
+  "type": "module",
+  "main": "electron/entry.cjs",
+  "bin": {
+    "code-tree": "bin/cosmos-tree.js",
+    "codetree": "bin/cosmos-tree.js",
+    "cosmos-tree": "bin/cosmos-tree.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "electron/",
+    "sample/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "author": "norika (https://github.com/norika1207-lab)",
+  "homepage": "https://github.com/norika1207-lab/code-tree#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/norika1207-lab/code-tree.git"
+  },
+  "bugs": {
+    "url": "https://github.com/norika1207-lab/code-tree/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "coding-agent",
+    "claude",
+    "cli",
+    "tui",
+    "codebase",
+    "visualization",
+    "developer-tools",
+    "token",
+    "dependency-graph"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "core": "node src/core/server.js",
+    "cli": "node bin/cosmos-tree.js",
+    "web": "vite",
+    "web:build": "vite build",
+    "dev": "node bin/cosmos-tree.js",
+    "app": "electron .",
+    "gui": "node bin/codetree.js",
+    "dist": "electron-builder --mac",
+    "dist:dir": "electron-builder --mac dir"
+  },
+  "build": {
+    "appId": "com.norika.codetree",
+    "productName": "Code Tree",
+    "asar": false,
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "package.json",
+      "!src/cli/codex-agent.js",
+      "!node_modules/@openai/**"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "directories": {
+      "output": "release"
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.158",
+    "@anthropic-ai/sdk": "^0.100.1",
+    "@openai/codex-sdk": "^0.135.0",
+    "chokidar": "^4.0.1",
+    "ink": "^5.0.1",
+    "node-pty": "^1.1.0",
+    "react": "^18.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
+    "react-dom": "^18.3.1",
+    "reactflow": "^11.11.4",
+    "vite": "^5.4.11"
+  }
+}

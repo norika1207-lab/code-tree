@@ -1,0 +1,20 @@
+node_modules/
+dist-web/
+.cosmos-tree/
+.claude/
+*.log
+release/
+*.tgz
+
+# 系統/編輯器垃圾
+._*
+.DS_Store
+
+# 內部開發規則,不進公開 repo
+CLAUDE.md
+
+# demo 動畫中間檔(只留 assets/ 成品)
+build/
+
+# 內部 spec,不進公開 repo
+cosmos_tree_spec.md
