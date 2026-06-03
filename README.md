@@ -6,7 +6,13 @@ A coding-agent CLI whose view follows whatever file the agent touches. You type 
 
 It runs on Claude, borrowing your existing Claude Code login, so there is no separate API key to set up. No cloud login at all? It also drives a local model (Ollama, vLLM, llama.cpp) with zero login.
 
-> A demo recording of the real app is coming. The earlier image in this README was a mockup and has been removed.
+<p align="center">
+  <img src="assets/demo.gif" alt="Code Tree reviewing its own codebase in real time" width="900">
+</p>
+
+<p align="center">
+  <sub>A real, unedited recording: Claude reviews Code Tree's own source. The camera follows each file it reads, the flow trail grows, and the token bar climbs as it works. (<a href="assets/demo.mp4">MP4</a>)</sub>
+</p>
 
 ## Install
 

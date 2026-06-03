@@ -12,8 +12,8 @@ import { WebSocket } from 'ws';
 import { exec } from 'node:child_process';
 import { startCore } from '../src/core/server.js';
 import { WS_PORT, WEB_PORT } from '../src/config.js';
-import { authStatus } from '../src/cli/auth.js';
-import { createScriptedLLM } from '../src/cli/llm.js';
+import { authStatus, getAuth } from '../src/cli/auth.js';
+import { createScriptedLLM, createClaudeLLM } from '../src/cli/llm.js';
 import { createLocalLLM } from '../src/cli/local-llm.js';
 import { detectLocalLLM } from '../src/cli/local-detect.js';
 import { createAgent } from '../src/cli/agent.js';
@@ -287,6 +287,8 @@ function App() {
         ? createAgent({ llm: createScriptedLLM(demoScript), root: target, emit, onEvent })
         : engine === 'codex'
           ? createCodexAgent({ root: target, model: modelArg, emit, onEvent })
+          : engine === 'claude-api'
+            ? createAgent({ llm: createClaudeLLM({ getAuth, model: modelArg || 'claude-sonnet-4-6' }), root: target, emit, onEvent, memory: createMemory({ root: target, model: modelArg || 'claude' }) })
           : engine === 'local'
             ? createAgent({ llm: createLocalLLM({ baseURL: localCfg.baseURL, model: localCfg.model }), root: target, emit, onEvent, systemSuffix: LOCAL_DISCIPLINE, memory: createMemory({ root: target, model: localCfg.model }) })
             : engine === 'routed'

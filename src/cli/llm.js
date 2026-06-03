@@ -42,6 +42,7 @@ async function parseSSE(res, onText) {
   let buf = '';
   const blocks = [];
   let stopReason = null;
+  const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 
   for await (const chunk of res.body) {
     buf += decoder.decode(chunk, { stream: true });
@@ -57,7 +58,13 @@ async function parseSSE(res, onText) {
       } catch {
         continue;
       }
-      if (ev.type === 'content_block_start') {
+      if (ev.type === 'message_start' && ev.message?.usage) {
+        const u = ev.message.usage;
+        usage.input_tokens = u.input_tokens || 0;
+        usage.cache_read_input_tokens = u.cache_read_input_tokens || 0;
+        usage.cache_creation_input_tokens = u.cache_creation_input_tokens || 0;
+        usage.output_tokens = u.output_tokens || 0;
+      } else if (ev.type === 'content_block_start') {
         const b = ev.content_block;
         if (b.type === 'tool_use') blocks[ev.index] = { type: 'tool_use', id: b.id, name: b.name, _json: '' };
         else blocks[ev.index] = { type: 'text', text: '' };
@@ -77,10 +84,11 @@ async function parseSSE(res, onText) {
         }
       } else if (ev.type === 'message_delta') {
         stopReason = ev.delta?.stop_reason ?? stopReason;
+        if (ev.usage?.output_tokens) usage.output_tokens = ev.usage.output_tokens;
       }
     }
   }
-  return { content: blocks.filter(Boolean), stop_reason: stopReason };
+  return { content: blocks.filter(Boolean), stop_reason: stopReason, usage };
 }
 
 // ── Scripted: for demos / offline verification. Emit pre-written assistant turns one by one. ──

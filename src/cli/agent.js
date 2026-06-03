@@ -123,6 +123,7 @@ export function createAgent({ llm, root, emit, onEvent, model, systemSuffix, mem
         },
       });
       forceToolNext = false;
+      if (res.usage) onEvent({ type: 'usage', usage: res.usage });
       if (res.confidence) { confTrace.push(res.confidence); onEvent({ type: 'confidence', ...res.confidence }); }
       messages.push({ role: 'assistant', content: res.content });
 
