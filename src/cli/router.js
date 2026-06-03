@@ -10,8 +10,8 @@
 // then escalate. Not inheriting the weak model's broken files is reasonable production behavior and also keeps "completion rate" cleanly measurable.
 
 export function createRouter({ tiers, buildAgent, reset, onTier } = {}) {
-  if (!Array.isArray(tiers) || !tiers.length) throw new Error('router 需要至少一個 tier');
-  if (typeof buildAgent !== 'function') throw new Error('router 需要 buildAgent(tier) -> { send }');
+  if (!Array.isArray(tiers) || !tiers.length) throw new Error('router needs at least one tier');
+  if (typeof buildAgent !== 'function') throw new Error('router needs buildAgent(tier) -> { send }');
 
   async function run(task) {
     const attempts = [];
@@ -62,10 +62,10 @@ function buildPriorNote(tier, outcome) {
   const probs = (outcome.verifyProblems || []);
   if (!files.length && !probs.length) return '';
   const lines = [];
-  lines.push(`\n\n（上一個較小的模型（${tier.name}）試過但沒修好，以下是牠踩到的坑，給你避雷，不要重蹈覆轍：）`);
-  if (files.length) lines.push(`- 牠改動過：${files.join('、')}（根因很可能在這附近，但牠的改法是錯的，別照抄）`);
-  for (const p of probs.slice(0, 6)) lines.push(`- 驗證沒過 [${p.kind}] ${p.file}：${p.message}`);
-  lines.push('- 請重新獨立診斷根因，改完一樣要通過驗證（含 npm test）才算完成。');
+  lines.push(`\n\n(A smaller model (${tier.name}) tried this but didn't fix it. Here are the traps it fell into, so you can avoid repeating its mistakes:)`);
+  if (files.length) lines.push(`- It changed: ${files.join(', ')} (the root cause is likely nearby, but its fix was wrong - don't copy it)`);
+  for (const p of probs.slice(0, 6)) lines.push(`- Verify failed [${p.kind}] ${p.file}: ${p.message}`);
+  lines.push('- Re-diagnose the root cause independently. Your fix must also pass verification (including npm test) to count as done.');
   return lines.join('\n');
 }
 

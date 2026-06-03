@@ -70,7 +70,7 @@ export function createLocalLLM({
         });
         if (res.ok) return await parseOpenAISSE(res, onText, toolNames);
         const txt = await res.text().catch(() => '');
-        lastErr = `本地 LLM ${res.status}: ${txt.slice(0, 300)}`;
+        lastErr = `Local LLM ${res.status}: ${txt.slice(0, 300)}`;
         // a 4xx is a problem with the request itself; retrying won't help, so throw immediately
         if (res.status < 500 || attempt === maxRetries) throw new Error(lastErr);
         await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));

@@ -15,13 +15,13 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const arg = process.argv.slice(2).find((a) => !a.startsWith('-'));
 const target = path.resolve(arg || process.cwd());
 if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
-  console.error('找不到資料夾：' + target);
+  console.error('Folder not found: ' + target);
   process.exit(1);
 }
 
 let electronBin;
 try { electronBin = require('electron'); } // the electron package exports the binary path
-catch { console.error('找不到 electron，先在 ' + appRoot + ' 跑 `npm install`'); process.exit(1); }
+catch { console.error('electron not found; run `npm install` in ' + appRoot + ' first'); process.exit(1); }
 
 const child = spawn(electronBin, [appRoot], {
   stdio: 'inherit',

@@ -33,9 +33,9 @@ function savePrefs(p) {
 
 async function pickProject() {
   const r = await dialog.showOpenDialog({
-    title: '選一個專案資料夾',
+    title: 'Choose a project folder',
     properties: ['openDirectory', 'createDirectory'],
-    buttonLabel: '在這裡開工',
+    buttonLabel: 'Open here',
   });
   if (r.canceled || !r.filePaths.length) return null;
   return r.filePaths[0];
@@ -91,7 +91,7 @@ function openProjectFlow(root, opts = {}) {
 
 // No project, just a terminal: the terminal opens in the home directory, and the visualization stays empty until you touch a file.
 function openNoProject() {
-  openProjectFlow(scratchRoot(), { terminalCwd: os.homedir(), label: '無專案', noProject: true, remember: false });
+  openProjectFlow(scratchRoot(), { terminalCwd: os.homedir(), label: 'No project', noProject: true, remember: false });
 }
 
 // Buttons in the bottom bar → reach here via preload
@@ -106,14 +106,14 @@ function buildMenu() {
   const template = [
     { role: 'appMenu' },
     {
-      label: '專案',
+      label: 'Project',
       submenu: [
         {
-          label: '開啟另一個專案…', accelerator: 'CmdOrCtrl+O',
+          label: 'Open another project…', accelerator: 'CmdOrCtrl+O',
           click: async () => { const root = await pickProject(); if (root) openProjectFlow(root); },
         },
         {
-          label: '只開終端機（無專案）', accelerator: 'CmdOrCtrl+N',
+          label: 'Terminal only (no project)', accelerator: 'CmdOrCtrl+N',
           click: () => openNoProject(),
         },
         { type: 'separator' },
@@ -122,7 +122,7 @@ function buildMenu() {
     },
     { role: 'editMenu' },
     {
-      label: '檢視',
+      label: 'View',
       submenu: [
         { role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' },
         { type: 'separator' },

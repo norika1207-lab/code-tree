@@ -22,7 +22,7 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
     try { ok = await onGate(report, lastSaid?.() || ''); } catch { ok = false; }
     return ok
       ? { behavior: 'allow', updatedInput: input }
-      : { behavior: 'deny', message: `MASL 關卡擋下：開發者沒有核准動 ${report.targetRel || '這個指令'}。停下來，先說清楚為什麼這樣改、怎麼驗證。` };
+      : { behavior: 'deny', message: `Blocked by the MASL gate: the developer did not approve touching ${report.targetRel || 'this command'}. Stop, and first explain clearly why you're changing it this way and how you'll verify it.` };
   }
 
   async function send(userText) {
@@ -58,7 +58,7 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
           }
         } else if (msg.type === 'result') {
           if (msg.is_error) {
-            onEvent({ type: 'error', message: (msg.result ?? msg.errors ?? '執行失敗').toString() });
+            onEvent({ type: 'error', message: (msg.result ?? msg.errors ?? 'Execution failed').toString() });
           }
           onEvent({ type: 'turn_end' });
         }

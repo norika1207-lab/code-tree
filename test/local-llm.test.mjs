@@ -250,4 +250,4 @@ await (async () => {
   ok('safe fallback when no logprobs', c.nTokens === 0 && c.meanLogprob === null && c.minLogprob === null && c.wantedToolMass === 0);
 }
 
-console.log(`\n全部通過：${pass} 項`);
+console.log(`\nAll passed: ${pass}`);

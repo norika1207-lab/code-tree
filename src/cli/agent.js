@@ -13,7 +13,7 @@ export function extractNarratedReads(text, { exists, alreadyRead = new Set(), ma
   const s = String(text || '');
   // without a read-intent signal, don't salvage, to avoid mistaking a filename mentioned in normal closing text for something to read.
   // requireIntent=false is used for "suspect files the task itself lists": those are explicitly flagged by the user and need no intent keyword.
-  if (requireIntent && !/(read_file|查看|讀取|读取|檢視|检视|看一下|看看)/.test(s)) return [];
+  if (requireIntent && !/(read_file|read|look|view|check|inspect|open|see)\b/i.test(s)) return [];
   const out = [];
   const seen = new Set();
   for (const m of s.matchAll(/[\w./-]+\.(?:mjs|cjs|jsx|tsx|js|ts|json|py)\b/g)) {
@@ -27,12 +27,12 @@ export function extractNarratedReads(text, { exists, alreadyRead = new Set(), ma
   return out;
 }
 
-const SYSTEM = `你是一個在使用者專案裡幹活的 coding agent，介面叫 Cosmos Tree。
-規則：
-- 動手前先用 list_dir / read_file 看清楚現況，不要憑空猜。
-- 要改檔案用 edit_file（精準替換）或 write_file（新檔/整檔重寫）。
-- 一次只做一件清楚的事，每個動作後簡短說你在哪個檔案做了什麼。
-- 完成後用一兩句話收尾，不要長篇大論。`;
+const SYSTEM = `You are a coding agent working inside the user's project. The interface is called Cosmos Tree.
+Rules:
+- Before acting, use list_dir / read_file to see the actual current state. Don't guess.
+- To change files, use edit_file (precise replacement) or write_file (new file / full-file rewrite).
+- Do one clear thing at a time, and after each action briefly say what you did in which file.
+- When done, wrap up in a sentence or two. Don't ramble.`;
 
 const READ_TOOLS = new Set(['read_file', 'list_dir', 'search_code']);
 const WRITE_TOOLS = new Set(['write_file', 'edit_file']);
@@ -160,11 +160,11 @@ export function createAgent({ llm, root, emit, onEvent, model, systemSuffix, mem
               onEvent({ type: 'active', path: rel });
               let out;
               try { out = await execute('read_file', { path: rel }); }
-              catch (e) { out = `工具錯誤：${e.message}`; }
-              parts.push(`檔案 ${rel}：\n${String(out)}`);
+              catch (e) { out = `Tool error: ${e.message}`; }
+              parts.push(`File ${rel}:\n${String(out)}`);
             }
             onEvent({ type: 'salvage', reads: wanted });
-            messages.push({ role: 'user', content: `（已照你說的把這些檔讀進來了，內容如下。看完直接動手：找出根因後用 write_file 整檔重寫修好，不要再用文字描述步驟。）\n\n${parts.join('\n\n')}` });
+            messages.push({ role: 'user', content: `(I went ahead and read in the files you mentioned. Their contents are below. Now act directly: find the root cause, then fix it by rewriting the whole file with write_file. Don't describe the steps in prose anymore.)\n\n${parts.join('\n\n')}` });
             continue; // after reading, loop back so it moves on to diagnose→act
           }
         }
@@ -176,8 +176,8 @@ export function createAgent({ llm, root, emit, onEvent, model, systemSuffix, mem
           const dumpedCode = /```/.test(lastTurnText);
           onEvent({ type: 'nudge', reason: dumpedCode ? 'code_in_text' : 'no_edit' });
           const msg = dumpedCode
-            ? '（你把程式碼貼在訊息裡，但那樣「完全不會生效」，檔案一個字都沒變。請『立刻』發一個 write_file 工具呼叫：path 填你要改的檔案路徑，content 填那個檔案修好後的完整內容。不要再用文字解釋，直接呼叫工具。）'
-            : '（你到目前為止還沒有修改任何檔案。如果這個任務需要改程式，請「直接用工具動手」：先 read_file 讀過可疑檔案找出根因，再用 write_file 整檔重寫或 edit_file 修好，不要只用文字描述步驟。如果確認真的不需要改任何檔案，再用一句話說明原因收尾。）';
+            ? "(You pasted the code into the message, but that has NO effect at all - not a single character of the file changed. Issue a write_file tool call RIGHT NOW: set path to the file you want to change, and content to the complete fixed contents of that file. Stop explaining in prose, just call the tool.)"
+            : "(You haven't modified any file so far. If this task requires changing code, ACT with the tools directly: first read_file the suspect files to find the root cause, then fix it by rewriting the whole file with write_file or editing with edit_file. Don't just describe the steps in prose. If you're sure no file actually needs changing, then wrap up with a one-sentence explanation of why.)";
           messages.push({ role: 'user', content: msg });
           forceToolNext = true; // next turn offer only write tools and force the named one, making it actually write the fixed content to the file
           continue;
@@ -197,7 +197,7 @@ export function createAgent({ llm, root, emit, onEvent, model, systemSuffix, mem
         try {
           out = await execute(tu.name, tu.input || {});
         } catch (e) {
-          out = `工具錯誤：${e.message}`;
+          out = `Tool error: ${e.message}`;
         }
         results.push({ type: 'tool_result', tool_use_id: tu.id, content: String(out) });
       }

@@ -87,12 +87,12 @@ function checkImportConsistency(root, file) {
     if (hasWildcard) continue; // target has export *, relax to avoid false positives
     const rel = path.relative(root, target);
     if (imp.wantsDefault && !names.has('default')) {
-      problems.push({ file: path.relative(root, file), kind: 'import', message: `從 ${rel} 預設匯入，但該檔沒有 export default` });
+      problems.push({ file: path.relative(root, file), kind: 'import', message: `default-imports from ${rel}, but that file has no export default` });
     }
     for (const n of imp.names) {
       if (!names.has(n)) {
-        const avail = [...names].filter((x) => x !== 'default').join(', ') || '(無)';
-        problems.push({ file: path.relative(root, file), kind: 'import', message: `匯入了 ${rel} 的 { ${n} }，但該檔沒有 export 這個名字。該檔實際 export：${avail}` });
+        const avail = [...names].filter((x) => x !== 'default').join(', ') || '(none)';
+        problems.push({ file: path.relative(root, file), kind: 'import', message: `imports { ${n} } from ${rel}, but that file does not export that name. The file actually exports: ${avail}` });
       }
     }
   }
@@ -143,7 +143,7 @@ export function runProjectTests(root) {
     // distinguish "tests failed" from "couldn't even run": both should send the model back to look, but the message differs
     const out = ((e.stdout ? e.stdout.toString() : '') + (e.stderr ? e.stderr.toString() : '')).trim();
     const tail = out.split('\n').filter(Boolean).slice(-12).join('\n') || e.message;
-    return [{ file: 'npm test', kind: 'test', message: `專案測試沒過（exit ${e.status ?? '非0'}）。輸出尾段：\n${tail}` }];
+    return [{ file: 'npm test', kind: 'test', message: `Project tests failed (exit ${e.status ?? 'non-zero'}). Output tail:\n${tail}` }];
   }
 }
 
@@ -166,7 +166,7 @@ export function verifyChangedFiles(root, changedRelPaths = [], opts = {}) {
 
 // Format problems into a block of text to feed back to the model
 export function formatProblems(problems) {
-  let out = '（自動驗證沒過，請修正以下問題，改完不要解釋、直接用工具改檔；全部修好再收工）\n';
-  for (const p of problems) out += `- [${p.kind}] ${p.file}：${p.message}\n`;
+  let out = '(Automatic verification failed. Fix the problems below. Once fixed, don\'t explain - just edit the files with the tools; finish only after everything passes.)\n';
+  for (const p of problems) out += `- [${p.kind}] ${p.file}: ${p.message}\n`;
   return out.trim();
 }

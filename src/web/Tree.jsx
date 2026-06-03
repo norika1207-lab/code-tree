@@ -168,7 +168,7 @@ export function Tree() {
         <div style={{ fontSize: 18, fontWeight: 700 }}>Cosmos Tree</div>
         <div style={{ fontSize: 11, color: '#7d8590' }}>{state.root}</div>
         <div style={{ fontSize: 11, marginTop: 2, color: connected ? '#3fb950' : '#f85149' }}>
-          {connected ? `● 已連線 · ${state.cells.length} 節點` : '○ 等待 core...'}
+          {connected ? `● connected · ${state.cells.length} nodes` : '○ waiting for core...'}
         </div>
       </div>
 

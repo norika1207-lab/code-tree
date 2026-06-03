@@ -10,7 +10,7 @@ export function createClaudeLLM({ getAuth, model = 'claude-sonnet-4-6', maxToken
   return {
     async run({ system, messages, tools, onText }) {
       const auth = await getAuth();
-      if (!auth) throw new Error('未登入：請先用 Claude Code 登入，或設 ANTHROPIC_API_KEY');
+      if (!auth) throw new Error('Not logged in: log in with Claude Code first, or set ANTHROPIC_API_KEY');
 
       const headers = { 'content-type': 'application/json', 'anthropic-version': API_VERSION };
       let sys = Array.isArray(system) ? system : [{ type: 'text', text: system || '' }];
@@ -29,7 +29,7 @@ export function createClaudeLLM({ getAuth, model = 'claude-sonnet-4-6', maxToken
       });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        if (res.status === 401) throw new Error('認證失效（401）：請回 Claude Code 重新登入');
+        if (res.status === 401) throw new Error('Authentication expired (401): please log back in through Claude Code');
         throw new Error(`Claude API ${res.status}: ${body.slice(0, 300)}`);
       }
       return await parseSSE(res, onText);
@@ -89,7 +89,7 @@ export function createScriptedLLM(script) {
   let i = 0;
   return {
     async run({ onText }) {
-      const turn = script[i++] || { text: '（劇本結束）', stop_reason: 'end_turn' };
+      const turn = script[i++] || { text: '(end of script)', stop_reason: 'end_turn' };
       if (turn.text) {
         for (const ch of turn.text) {
           onText?.(ch);

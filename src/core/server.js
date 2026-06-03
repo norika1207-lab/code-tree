@@ -19,12 +19,13 @@ import { computeSavings } from './token-savings.js';
 import { createSessionLogger } from './session-log.js';
 
 // Work discipline for the local small model (used by routed's first tier). Makes the small model actually call tools instead of just describing a plan.
-const LOCAL_DISCIPLINE = `（重要工作紀律）
-- 任務還沒完成前，每一輪「只」輸出一個工具呼叫，不要用文字描述你「打算」呼叫什麼。想讀檔就直接發 read_file，想改檔就直接發 edit_file。
-- 不要把工具呼叫寫成 markdown 或 JSON 範例貼在回覆裡。要呼叫就真的呼叫。
-- 掌握足夠資訊就動手改（edit_file / write_file），不要只停在描述計畫。
-- 改小檔（大約 40 行以內）就直接用 write_file 把整個檔案重寫一遍，這最可靠。
-- 只有在整個任務確實做完時，才用純文字做最後收尾；那一輪不要再發工具呼叫。`;
+const LOCAL_DISCIPLINE = `(Important work discipline)
+- Until the task is done, emit ONLY one tool call per turn. Do not describe in prose what you "intend" to call. Want to read a file? Send read_file directly. Want to change a file? Send edit_file directly.
+- Do not paste tool calls as markdown or JSON examples in your reply. If you mean to call a tool, actually call it.
+- Once you have enough information, make the change (edit_file / write_file). Do not stop at describing a plan.
+- For small files (roughly under 40 lines), just rewrite the whole file with write_file. This is the most reliable approach. edit_file's old_str must match the text in the file exactly (including whitespace and punctuation); if it doesn't match it will fail.
+- If a tool tells you it "could not find the text to replace", that edit did not take effect. Switch to write_file and rewrite the whole file. Do not paste the same old_str again.
+- Only when the entire task is truly done should you give a final plain-text wrap-up; do not emit any tool call on that turn.`;
 
 // makeAgent is injectable: defaults to the SDK agent (borrowing Claude Code's login); tests swap in scripted (burns no token).
 export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_PORT, quiet = false, makeAgent, terminalCwd, projectLabel, noProject = false } = {}) {
@@ -53,7 +54,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   const HTML_PATH = path.join(WEB_DIR, 'cosmos.html');
   const TERM_PATH = path.join(WEB_DIR, 'terminal.html');
   // Inject the actual WS port + project label into the page, so the frontend can connect to this core and the bottom bar can show what's open
-  const projLabel = noProject ? '無專案' : (projectLabel || path.basename(root));
+  const projLabel = noProject ? 'no project' : (projectLabel || path.basename(root));
   const injectPort = (html) => html.replace('<head>',
     `<head><script>window.__WS_PORT__=${port};window.__PROJECT_LABEL__=${JSON.stringify(projLabel)};window.__NO_PROJECT__=${noProject ? 'true' : 'false'}</script>`);
   const serveHtml = (res, file, label) => {
@@ -62,7 +63,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       res.end(injectPort(fs.readFileSync(file, 'utf8')));
     } catch (e) {
       res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
-      res.end(label + ' 讀不到：' + e.message);
+      res.end(label + ' cannot read: ' + e.message);
     }
   };
   const webServer = http.createServer((req, res) => {
@@ -75,7 +76,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       const abs = path.resolve(root, rel);
       if (abs !== root && !abs.startsWith(root + path.sep)) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('超出專案範圍');
+        res.end('outside project scope');
         return;
       }
       try {
@@ -84,7 +85,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         res.end(txt);
       } catch (e) {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('讀不到：' + e.message);
+        res.end('cannot read: ' + e.message);
       }
       return;
     }
@@ -95,7 +96,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       const abs = path.resolve(root, rel);
       if (abs !== root && !abs.startsWith(root + path.sep)) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('超出專案範圍');
+        res.end('outside project scope');
         return;
       }
       const MIME = {
@@ -114,7 +115,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         res.end(buf);
       } catch (e) {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('讀不到：' + e.message);
+        res.end('cannot read: ' + e.message);
       }
       return;
     }
@@ -128,10 +129,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       actualWebPort++;
       setTimeout(() => webServer.listen(actualWebPort), 80);
     } else {
-      log('web 服務起不來:', e.message);
+      log('web server failed to start:', e.message);
     }
   });
-  webServer.on('listening', () => log(`世界樹開在 http://localhost:${actualWebPort}`));
+  webServer.on('listening', () => log(`world tree opened at http://localhost:${actualWebPort}`));
   webServer.listen(actualWebPort);
 
   const log = (...a) => !quiet && console.log('[core]', ...a);
@@ -175,7 +176,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   const LOCAL_MODEL = process.env.CODETREE_LOCAL_MODEL || 'qwen-coder';
   const defaultAgent = ({ onEvent, emit, getState, onGate, lastSaid }) => {
     if (ENGINE === 'routed') {
-      log(`省 token 引擎啟用：先本地 ${LOCAL_MODEL}（${LOCAL_URL}），跑不過才升級 Claude`);
+      log(`token-saving engine enabled: try local ${LOCAL_MODEL} first (${LOCAL_URL}), escalate to Claude only if it fails`);
       return createRoutedAgent({
         root, emit, onEvent,
         baseURL: LOCAL_URL, localModel: LOCAL_MODEL,
@@ -230,7 +231,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
             cell_id: cell.id,
             path: cell.path,
             count: cell.modification_count,
-            message: `第 ${cell.modification_count} 次修改 ${cell.path}，方向可能未收斂`,
+            message: `Modification #${cell.modification_count} of ${cell.path}; direction may not be converging`,
           },
         });
       }
@@ -243,7 +244,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     })
     .on('ready', () => {
       ready = true;
-      log(`掃描完成，${graph.cells.size} 個檔案節點，${graph.edges.size} 條依賴連線`);
+      log(`scan complete: ${graph.cells.size} file nodes, ${graph.edges.size} dependency edges`);
       pushState();
     });
   }
@@ -388,7 +389,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       if (slog.ok) {
         sessionLogs.add(slog);
         ws.send(JSON.stringify({ type: 'session_log', payload: { file: slog.file } }));
-        log('session 逐字稿 ->', slog.file);
+        log('session transcript ->', slog.file);
       }
       pty.onData((d) => {
         if (slog) slog.stream('term', d);
@@ -454,7 +455,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       if (n >= 2) {
         broadcast({
           type: 'anomaly',
-          payload: { rule: 'error_recurring', message: `錯誤未解決（第 ${n} 次）：${msg.message}` },
+          payload: { rule: 'error_recurring', message: `Error still unresolved (occurrence #${n}): ${msg.message}` },
         });
       }
     }
@@ -466,13 +467,13 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     for (const cell of stalled) {
       broadcast({
         type: 'anomaly',
-        payload: { rule: 'stall', cell_id: cell.id, path: cell.path, message: `${cell.path} 停滯超過 10 分鐘，可能卡住` },
+        payload: { rule: 'stall', cell_id: cell.id, path: cell.path, message: `${cell.path} has stalled for over 10 minutes; it may be stuck` },
       });
     }
     if (stalled.length) pushState();
   }, 30 * 1000);
 
-  log(`WebSocket 開在 ws://localhost:${port}，監看 ${root}`);
+  log(`WebSocket on ws://localhost:${port}, watching ${root}`);
 
   return {
     graph,

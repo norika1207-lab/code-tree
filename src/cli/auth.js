@@ -57,7 +57,7 @@ async function refresh(refreshToken) {
       client_id: OAUTH_CLIENT_ID,
     }),
   });
-  if (!res.ok) throw new Error(`refresh 失敗 ${res.status}`);
+  if (!res.ok) throw new Error(`refresh failed ${res.status}`);
   const j = await res.json();
   return {
     accessToken: j.access_token,

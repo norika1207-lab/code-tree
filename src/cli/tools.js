@@ -8,7 +8,7 @@ import { CODE_EXT } from '../config.js';
 function safeResolve(root, p) {
   const abs = path.resolve(root, p);
   if (abs !== root && !abs.startsWith(root + path.sep)) {
-    throw new Error(`路徑超出專案範圍: ${p}`);
+    throw new Error(`Path is outside the project: ${p}`);
   }
   return abs;
 }
@@ -18,15 +18,15 @@ const ignoreDir = (name) => ['node_modules', '.git', 'dist', 'build', '.next', '
 export const TOOL_DEFS = [
   {
     name: 'list_dir',
-    description: '列出某個資料夾下的檔案與子資料夾（相對於專案根）。不給 path 就列根目錄。',
+    description: 'List the files and subfolders inside a folder (relative to the project root). If path is omitted, lists the root directory.',
     input_schema: {
       type: 'object',
-      properties: { path: { type: 'string', description: '相對路徑，預設 "."' } },
+      properties: { path: { type: 'string', description: 'Relative path, defaults to "."' } },
     },
   },
   {
     name: 'read_file',
-    description: '讀取一個檔案的內容（附行號）。',
+    description: 'Read the contents of a file (with line numbers).',
     input_schema: {
       type: 'object',
       properties: { path: { type: 'string' } },
@@ -35,7 +35,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'write_file',
-    description: '建立或覆寫一個檔案的完整內容。新檔會在樹上長出新格子。',
+    description: 'Create or overwrite the full contents of a file. A new file grows a new cell on the tree.',
     input_schema: {
       type: 'object',
       properties: { path: { type: 'string' }, content: { type: 'string' } },
@@ -44,7 +44,7 @@ export const TOOL_DEFS = [
   },
   {
     name: 'edit_file',
-    description: '把檔案裡某段文字 old_str 換成 new_str（old_str 必須在檔案中唯一）。',
+    description: 'Replace a piece of text old_str in a file with new_str (old_str must be unique within the file).',
     input_schema: {
       type: 'object',
       properties: {
@@ -57,12 +57,12 @@ export const TOOL_DEFS = [
   },
   {
     name: 'search_code',
-    description: '在整個專案裡搜尋一個關鍵字/字串，回傳每個出現位置的「檔案:行號: 該行內容」。動手讀整個檔案前，先用這個快速定位某個符號、函式、變數出現在哪些檔案，再針對性地 read_file。',
+    description: 'Search the whole project for a keyword/string and return "file:line: line content" for each occurrence. Before reading an entire file, use this to quickly locate which files a symbol, function, or variable appears in, then read_file the relevant ones.',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '要搜尋的關鍵字或片段' },
-        max_results: { type: 'number', description: '最多回傳幾筆，預設 40' },
+        query: { type: 'string', description: 'The keyword or snippet to search for' },
+        max_results: { type: 'number', description: 'Maximum number of results to return, defaults to 40' },
       },
       required: ['query'],
     },
@@ -89,7 +89,7 @@ export function makeExecutor(root, emit) {
         }
       }
       emit('read', rel(dir));
-      return lines.length ? lines.sort().join('\n') : '(空)';
+      return lines.length ? lines.sort().join('\n') : '(empty)';
     }
 
     if (name === 'read_file') {
@@ -99,7 +99,7 @@ export function makeExecutor(root, emit) {
       const lines = src.split('\n');
       const capped = lines.slice(0, 600);
       const numbered = capped.map((l, i) => `${String(i + 1).padStart(4)}  ${l}`).join('\n');
-      return numbered + (lines.length > 600 ? `\n… (還有 ${lines.length - 600} 行)` : '');
+      return numbered + (lines.length > 600 ? `\n… (${lines.length - 600} more lines)` : '');
     }
 
     if (name === 'write_file') {
@@ -108,23 +108,23 @@ export function makeExecutor(root, emit) {
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, input.content);
       emit('modify', rel(abs), { created: !existed });
-      return `${existed ? '已覆寫' : '已建立'} ${rel(abs)}（${input.content.split('\n').length} 行）`;
+      return `${existed ? 'Overwrote' : 'Created'} ${rel(abs)} (${input.content.split('\n').length} lines)`;
     }
 
     if (name === 'edit_file') {
       const abs = safeResolve(root, input.path);
       const src = fs.readFileSync(abs, 'utf8');
       const idx = src.indexOf(input.old_str);
-      if (idx === -1) return `錯誤：在 ${rel(abs)} 找不到要替換的文字`;
-      if (src.indexOf(input.old_str, idx + 1) !== -1) return `錯誤：old_str 在 ${rel(abs)} 出現多次，請給更精確的片段`;
+      if (idx === -1) return `Error: could not find the text to replace in ${rel(abs)}`;
+      if (src.indexOf(input.old_str, idx + 1) !== -1) return `Error: old_str appears multiple times in ${rel(abs)}, please give a more precise snippet`;
       fs.writeFileSync(abs, src.slice(0, idx) + input.new_str + src.slice(idx + input.old_str.length));
       emit('modify', rel(abs));
-      return `已修改 ${rel(abs)}`;
+      return `Modified ${rel(abs)}`;
     }
 
     if (name === 'search_code') {
       const q = String(input.query || '');
-      if (!q) return '錯誤：query 不可空白';
+      if (!q) return 'Error: query cannot be empty';
       const limit = Math.min(Number(input.max_results) || 40, 200);
       const ql = q.toLowerCase();
       const hits = [];
@@ -154,9 +154,9 @@ export function makeExecutor(root, emit) {
       };
       walk(root);
       for (const f of matchedFiles) emit('read', f); // the matched cells light up on the tree
-      return hits.length ? hits.join('\n') : `找不到符合「${q}」的內容`;
+      return hits.length ? hits.join('\n') : `No matches found for "${q}"`;
     }
 
-    return `未知工具: ${name}`;
+    return `Unknown tool: ${name}`;
   };
 }

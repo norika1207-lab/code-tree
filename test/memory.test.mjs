@@ -88,4 +88,4 @@ function ok(name, cond) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-console.log(`\n全部通過：${pass} 項`);
+console.log(`\nAll passed: ${pass}`);

@@ -74,4 +74,4 @@ function tmpRepo(files) {
   ok('format includes the filename and message', txt.includes('a.js') && txt.includes('setSession'));
 }
 
-console.log(`\n全部通過：${pass} 項`);
+console.log(`\nAll passed: ${pass}`);

@@ -87,7 +87,7 @@ export function createRunner({ root, graph, broadcast, makeAgent }) {
   }
 
   async function run(text, id) {
-    if (busy) { broadcast({ type: 'agent_error', payload: { message: '上一個 prompt 還在跑' } }); return; }
+    if (busy) { broadcast({ type: 'agent_error', payload: { message: 'previous prompt is still running' } }); return; }
     busy = true;
     lastSaidBuf = '';
     meter.startTurn();

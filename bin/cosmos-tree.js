@@ -44,13 +44,13 @@ const ENGINE = flags.has('--codex')
 const baseURLArg = argv.find((a) => a.startsWith('--base-url='))?.split('=')[1] || 'http://localhost:8000/v1';
 // Small models (7B) often describe the next step in prose instead of actually emitting a tool call, which breaks the loop.
 // This discipline is only added for the local engine; Claude / codex are left untouched.
-const LOCAL_DISCIPLINE = `（重要工作紀律）
-- 任務還沒完成前，每一輪「只」輸出一個工具呼叫，不要用文字描述你「打算」呼叫什麼。想讀檔就直接發 read_file，想改檔就直接發 edit_file。
-- 不要把工具呼叫寫成 markdown 或 JSON 範例貼在回覆裡。要呼叫就真的呼叫。
-- 掌握足夠資訊就動手改（edit_file / write_file），不要只停在描述計畫。
-- 改小檔（大約 40 行以內）就直接用 write_file 把整個檔案重寫一遍，這最可靠。edit_file 的 old_str 必須跟檔案裡的文字一字不差（含空白與標點），對不上就會失敗。
-- 工具回你「找不到要替換的文字」就代表那次編輯沒生效，改用 write_file 整檔重寫，不要重複貼同樣的 old_str。
-- 只有在整個任務確實做完時，才用純文字做最後收尾；那一輪不要再發工具呼叫。`;
+const LOCAL_DISCIPLINE = `(Important work discipline)
+- Until the task is done, emit ONLY one tool call per turn. Do not describe in prose what you "intend" to call. Want to read a file? Send read_file directly. Want to change a file? Send edit_file directly.
+- Do not paste tool calls as markdown or JSON examples in your reply. If you mean to call a tool, actually call it.
+- Once you have enough information, make the change (edit_file / write_file). Do not stop at describing a plan.
+- For small files (roughly under 40 lines), just rewrite the whole file with write_file. This is the most reliable approach. edit_file's old_str must match the text in the file exactly (including whitespace and punctuation); if it doesn't match it will fail.
+- If a tool tells you it "could not find the text to replace", that edit did not take effect. Switch to write_file and rewrite the whole file. Do not paste the same old_str again.
+- Only when the entire task is truly done should you give a final plain-text wrap-up; do not emit any tool call on that turn.`;
 
 // Subcommands: login / status → just report auth status (borrows Claude Code, no re-login needed)
 if (positional[0] === 'login' || positional[0] === 'status') {

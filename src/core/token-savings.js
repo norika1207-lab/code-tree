@@ -73,7 +73,7 @@ function msgCost(m) {
 export async function computeSavings() {
   let dirs;
   try { dirs = await fs.readdir(CLAUDE_DIR, { withFileTypes: true }); } catch {
-    return { ok: false, error: '讀不到 ~/.claude/projects' };
+    return { ok: false, error: 'cannot read ~/.claude/projects' };
   }
   const files = [];
   for (const d of dirs) {

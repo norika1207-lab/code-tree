@@ -63,12 +63,12 @@ export function createMemory({ root, model = 'unknown', topK = 3, maxChars = 120
     if (!ranked.length) return '';
     // For small models, the wording must "give it permission to follow" rather than "tell it not to copy".
     // Observed that the old wording "for reference only, don't copy" made weak models deliberately ignore the verified fix and invent a wrong approach instead.
-    let out = '（你過去在這個專案修過幾乎一樣的問題，下面是當時「驗證通過」的修法。請先用 read_file 確認現況；只要問題本質相同，就直接照這個修法用 edit_file/write_file 改在「同一個檔案」上，不要另外發明新做法、不要新增檔案。）\n';
+    let out = '(You have fixed almost the same problem in this project before. Below is the fix that "passed verification" back then. First use read_file to check the current state; as long as the problem is essentially the same, apply this fix directly with edit_file/write_file on the SAME file. Do not invent a new approach and do not add new files.)\n';
     for (const { r } of ranked) {
       const line =
-        `- 任務：${String(r.task).slice(0, 120)}\n` +
-        `  當時改過的檔：${(r.filesModified || []).join(', ')}\n` +
-        `  做法摘要：${String(r.summary || '').replace(/\s+/g, ' ').slice(0, 160)}\n`;
+        `- Task: ${String(r.task).slice(0, 120)}\n` +
+        `  Files changed then: ${(r.filesModified || []).join(', ')}\n` +
+        `  Approach summary: ${String(r.summary || '').replace(/\s+/g, ' ').slice(0, 160)}\n`;
       if (out.length + line.length > maxChars) break;
       out += line;
     }
