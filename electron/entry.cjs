@@ -1,6 +1,6 @@
-// CommonJS 進入點：打包後的 Electron 對「ESM 當 main」支援不穩，main.js 會靜默不執行。
-// 用一個 CJS shim 動態 import 真正的 ESM main，dev / 打包兩邊都吃得到，
-// 失敗時也把錯誤寫進 log（不然打包後 main 出錯是完全沒聲音的）。
+// CommonJS entry point: packaged Electron has flaky support for "ESM as main", so main.js silently fails to run.
+// Use a CJS shim to dynamically import the real ESM main, which works in both dev and packaged builds,
+// and writes errors to the log on failure (otherwise a packaged main error is completely silent).
 const { app } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');

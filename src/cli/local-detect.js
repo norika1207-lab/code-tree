@@ -1,13 +1,13 @@
-// 偵測「本機正在跑的 OpenAI 相容模型 server」，讓 code-tree 不必登入任何雲端 LLM
-// 就能直接寫 code。探測順序：env 指定 > Ollama(:11434) > 通用 OpenAI 相容(:8000/:1234)。
-// 回 { baseURL, model, provider, models } 或 null。model 為 null 代表 server 在跑但沒裝模型。
+// Detect "an OpenAI-compatible model server running locally" so code-tree can write code directly
+// without logging into any cloud LLM. Probe order: env override > Ollama(:11434) > generic OpenAI-compatible(:8000/:1234).
+// Returns { baseURL, model, provider, models } or null. A null model means the server is running but has no model installed.
 //
-// 為什麼是這幾個：
-//   - Ollama 是目前最普及的「裝了就有、零雲端登入」本機路徑，OpenAI 端點在 :11434/v1，
-//     原生清單在 /api/tags（回 { models:[{name}] }）。
-//   - vLLM / llama.cpp server / LM Studio 都吐 OpenAI 相容 /v1/models（回 { data:[{id}] }）。
+// Why these:
+//   - Ollama is currently the most common "installed and ready, zero cloud login" local path; its OpenAI endpoint is at :11434/v1,
+//     and its native listing is at /api/tags (returns { models:[{name}] }).
+//   - vLLM / llama.cpp server / LM Studio all expose OpenAI-compatible /v1/models (returns { data:[{id}] }).
 
-// 挑模型時偏好「會寫 code 的」：名字含這些關鍵字的優先。
+// When picking a model, prefer "one that writes code": names containing these keywords win.
 const CODER_HINT = /(coder|code|qwen|deepseek|codellama|starcoder|granite|devstral|codestral|llama)/i;
 
 async function getJson(url, ms = 1200) {
@@ -31,7 +31,7 @@ function pickModel(names, prefer) {
 }
 
 export async function detectLocalLLM({ preferModel } = {}) {
-  // 0) env 明確指定 → 直接信，不探測
+  // 0) env explicitly set → trust it, no probing
   const envUrl = process.env.CODETREE_LOCAL_URL;
   if (envUrl) {
     return {
@@ -42,19 +42,19 @@ export async function detectLocalLLM({ preferModel } = {}) {
     };
   }
 
-  // 1) Ollama（主路徑，timeout 放寬到 3s：機器忙時 1.2s 會偶發 miss，害我們誤判沒有本機可退）
+  // 1) Ollama (the main path; timeout relaxed to 3s: at 1.2s a busy machine occasionally misses, making us wrongly conclude there's no local fallback)
   const tags = await getJson('http://localhost:11434/api/tags', 3000);
   if (tags && Array.isArray(tags.models)) {
     const names = tags.models.map((m) => m.name || m.model).filter(Boolean);
     return {
       baseURL: 'http://localhost:11434/v1',
-      model: pickModel(names, preferModel), // 沒裝模型時為 null
+      model: pickModel(names, preferModel), // null when no model is installed
       provider: 'ollama',
       models: names,
     };
   }
 
-  // 2) 通用 OpenAI 相容 server（vLLM / llama.cpp / LM Studio）
+  // 2) generic OpenAI-compatible server (vLLM / llama.cpp / LM Studio)
   for (const base of ['http://localhost:8000/v1', 'http://localhost:1234/v1']) {
     const models = await getJson(base + '/models');
     const data = models && models.data;

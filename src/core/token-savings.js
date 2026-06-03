@@ -1,7 +1,7 @@
-// token 浪費量測（純 Node 版，把 mercury_cache_panel.py 的省 token 數學港過來）。
-// 目的：拔掉 python 依賴，App 打包才乾淨。只讀本機 ~/.claude/projects/*/*.jsonl，不外傳。
-// 算法對齊 python：session_cost（actual vs naive vs saved）、detect_waste（寫了沒被讀回的 cache）、
-// clear_now_savings（現在清掉接下來 1 小時大概省多少）。
+// Token waste measurement (pure Node version, porting the token-saving math from mercury_cache_panel.py).
+// Goal: drop the python dependency so the app packages cleanly. Reads only local ~/.claude/projects/*/*.jsonl, nothing leaves the machine.
+// Algorithm matches python: session_cost (actual vs naive vs saved), detect_waste (cache written but never read back),
+// clear_now_savings (roughly how much clearing now saves over the next hour).
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,10 +13,10 @@ const TTL_1H = 3600, TTL_5M = 300, ACTIVE_WINDOW = 900;
 function parseTs(s) {
   if (!s) return 0;
   const t = Date.parse(s);
-  return Number.isFinite(t) ? t / 1000 : 0; // 秒
+  return Number.isFinite(t) ? t / 1000 : 0; // seconds
 }
 
-// 讀一個 session 檔 → 抽出每則 assistant 訊息的 usage
+// Read one session file → extract the usage of each assistant message
 async function parseSession(file) {
   let txt;
   try { txt = await fs.readFile(file, 'utf8'); } catch { return null; }
@@ -52,7 +52,7 @@ function sessionCost(msgs) {
   return { actual, naive, saved: naive - actual };
 }
 
-// 浪費：寫進 cache 卻在 TTL 內沒有任何後續訊息把它讀回來
+// Waste: written into cache but no later message reads it back within the TTL
 function detectWaste(msgs) {
   let w1 = 0, w5 = 0;
   for (let i = 0; i < msgs.length; i++) {
@@ -69,7 +69,7 @@ function msgCost(m) {
     + m.cache_write_1h / 1e6 * PRICING.cache_write_1h + m.cache_write_5m / 1e6 * PRICING.cache_write_5m;
 }
 
-// 掃所有 session，回跟 python wrapper 一樣形狀的數字
+// Scan all sessions, returning numbers in the same shape as the python wrapper
 export async function computeSavings() {
   let dirs;
   try { dirs = await fs.readdir(CLAUDE_DIR, { withFileTypes: true }); } catch {
@@ -97,7 +97,7 @@ export async function computeSavings() {
       nActive++;
       const recent = s.msgs.filter((m) => now - m.ts < 3600);
       const recentCost = recent.reduce((a, m) => a + msgCost(m), 0);
-      if (recentCost > 1) clearNow += recentCost * 0.3; // 清掉省的粗估：避免接下來 1 小時重建 stale cache
+      if (recentCost > 1) clearNow += recentCost * 0.3; // rough savings estimate from clearing: avoids rebuilding stale cache over the next hour
     }
   }
 

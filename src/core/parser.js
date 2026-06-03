@@ -1,6 +1,6 @@
-// 輕量 import 解析。MVP 不用 tree-sitter（避免 native build 卡安裝），
-// 用 regex 抽出 import / require / from-import，足夠畫出檔案間的依賴連線。
-// Phase 2 再換 tree-sitter 做 function 層級。
+// Lightweight import parsing. The MVP skips tree-sitter (to avoid native builds stalling install),
+// using regex to pull out import / require / from-import, which is enough to draw the dependency links between files.
+// Phase 2 swaps in tree-sitter for function-level granularity.
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -22,9 +22,9 @@ function isRelative(spec) {
   return spec.startsWith('.') || spec.startsWith('/');
 }
 
-// 把 import specifier 解析成專案內真實檔案路徑（絕對）。解不到回 null（外部套件）。
+// Resolve an import specifier to a real in-project file path (absolute). Returns null when unresolvable (external package).
 function resolveJs(fromFile, spec, root) {
-  if (!isRelative(spec)) return null; // node_modules / 內建模組，不畫
+  if (!isRelative(spec)) return null; // node_modules / built-in module, don't draw
   const base = path.resolve(path.dirname(fromFile), spec);
   for (const ext of RESOLVE_EXT) {
     const cand = base + ext;
@@ -34,7 +34,7 @@ function resolveJs(fromFile, spec, root) {
 }
 
 function resolvePy(fromFile, spec, root) {
-  if (!spec.startsWith('.')) return null; // 只解相對 import
+  if (!spec.startsWith('.')) return null; // only resolve relative imports
   const dots = spec.match(/^\.+/)[0].length;
   const rest = spec.slice(dots).replace(/\./g, path.sep);
   let dir = path.dirname(fromFile);
@@ -46,7 +46,7 @@ function resolvePy(fromFile, spec, root) {
   return null;
 }
 
-// 回傳這個檔案 import 到的「專案內」檔案絕對路徑陣列。
+// Return the array of absolute paths to the in-project files this file imports.
 export function parseImports(filePath, root) {
   let src;
   try {

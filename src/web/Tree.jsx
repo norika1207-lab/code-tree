@@ -5,12 +5,12 @@ import { WS_PORT } from '../config.js';
 
 const STATUS_COLOR = {
   idle: { bg: '#161b22', border: '#30363d', text: '#7d8590' },
-  active: { bg: '#0f2417', border: '#2ea043', text: '#3fb950' }, // 綠 = agent 在動
-  modified: { bg: '#2b2412', border: '#bb8009', text: '#e3b341' }, // 琥珀 = 改過
-  error: { bg: '#2d1416', border: '#f85149', text: '#ff7b72' }, // 紅 = 反覆改 / 出事
+  active: { bg: '#0f2417', border: '#2ea043', text: '#3fb950' }, // green = agent working
+  modified: { bg: '#2b2412', border: '#bb8009', text: '#e3b341' }, // amber = edited
+  error: { bg: '#2d1416', border: '#f85149', text: '#ff7b72' }, // red = repeated edits / something broke
 };
 
-// ── 自訂節點：顯示檔名、語言、修改次數圓點，異常時閃爍 ──
+// ── Custom node: shows filename, language, and edit-count dots, flashing on anomaly ──
 function CellNode({ data }) {
   const c = STATUS_COLOR[data.status] || STATUS_COLOR.idle;
   const flashing = data.anomaly === 'repeat' || data.anomaly === 'error';
@@ -49,7 +49,7 @@ function CellNode({ data }) {
 
 const nodeTypes = { cell: CellNode };
 
-// 依目錄深度分欄排版（spec：根=entry，主幹=核心 module，葉=utils）
+// Lay out in columns by directory depth (spec: root=entry, trunk=core modules, leaves=utils)
 function layout(cells, edges, hovered) {
   const importers = new Set();
   if (hovered) for (const e of edges) if (e.to === hovered) importers.add(e.from);
@@ -111,7 +111,7 @@ export function Tree() {
       ws.onclose = () => {
         if (!alive) return;
         setConnected(false);
-        setTimeout(connect, 1000); // 自動重連
+        setTimeout(connect, 1000); // auto-reconnect
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
@@ -163,7 +163,7 @@ export function Tree() {
         <Controls showInteractive={false} />
       </ReactFlow>
 
-      {/* 左上：標題 + 連線狀態 */}
+      {/* Top-left: title + connection status */}
       <div style={{ position: 'absolute', top: 14, left: 14, color: '#e6edf3', pointerEvents: 'none' }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>Cosmos Tree</div>
         <div style={{ fontSize: 11, color: '#7d8590' }}>{state.root}</div>
@@ -172,7 +172,7 @@ export function Tree() {
         </div>
       </div>
 
-      {/* 右上：活動 feed */}
+      {/* Top-right: activity feed */}
       <div style={{ position: 'absolute', top: 14, right: 14, width: 280, color: '#7d8590', fontSize: 11 }}>
         {feed.map((a) => (
           <div key={a.key} style={{ opacity: 0.9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -184,7 +184,7 @@ export function Tree() {
         ))}
       </div>
 
-      {/* 異常 toast */}
+      {/* Anomaly toast */}
       <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', width: 460 }}>
         {toasts.map((t) => (
           <div

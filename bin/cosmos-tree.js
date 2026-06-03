@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Cosmos Tree CLI：一個原生的 coding agent 介面。
-// 不是傳統的文字捲動，而是「程式現在寫到哪個檔案，視角就跳到那一格」。
-// 隨時按 Tab 切 Tree View，看整個 codebase 長成多大一棵樹。
-// 用 Claude 啟動，借你 Claude Code 的 OAuth session 登入。
+// Cosmos Tree CLI: a native coding agent interface.
+// Instead of the usual scrolling text, the view jumps to whichever file the agent is writing to right now.
+// Hit Tab anytime to switch to Tree View and see how big a tree your whole codebase has grown into.
+// Launches with Claude, borrowing your Claude Code OAuth session to log in.
 import { createElement as h, useState, useEffect, useRef } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 import net from 'node:net';
@@ -28,22 +28,22 @@ import { reportLines } from '../src/masl/gate.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 
-// ── 參數 ──
+// ── args ──
 const argv = process.argv.slice(2);
 const flags = new Set(argv.filter((a) => a.startsWith('--')));
 const positional = argv.filter((a) => !a.startsWith('--'));
 const modelArg = argv.find((a) => a.startsWith('--model='))?.split('=')[1];
-// 引擎選擇：--codex 走 ChatGPT 登入；--local / --no-cloud 強制走本機模型（零雲端登入）；
-// 預設 claude 借 Claude Code 登入，但若沒登入會自動退回偵測到的本機模型。
+// Engine selection: --codex uses ChatGPT login; --local / --no-cloud forces a local model (zero cloud login);
+// the default, claude, borrows the Claude Code login, but falls back to a detected local model if not logged in.
 const ENGINE = flags.has('--codex')
   ? 'codex'
   : flags.has('--local') || flags.has('--no-cloud')
     ? 'local'
     : argv.find((a) => a.startsWith('--engine='))?.split('=')[1] || 'claude';
-// 本地引擎：指向 OpenAI 相容 endpoint（vLLM / llama.cpp）。預設本機，可用 --base-url 指到 GX10。
+// Local engine: points at an OpenAI-compatible endpoint (vLLM / llama.cpp). Defaults to localhost; use --base-url to point at GX10.
 const baseURLArg = argv.find((a) => a.startsWith('--base-url='))?.split('=')[1] || 'http://localhost:8000/v1';
-// 小模型(7B)常把下一步寫成白話而不真的發工具呼叫，迴圈就斷了。
-// 這段紀律只加在 local 引擎，不動 Claude / codex。
+// Small models (7B) often describe the next step in prose instead of actually emitting a tool call, which breaks the loop.
+// This discipline is only added for the local engine; Claude / codex are left untouched.
 const LOCAL_DISCIPLINE = `（重要工作紀律）
 - 任務還沒完成前，每一輪「只」輸出一個工具呼叫，不要用文字描述你「打算」呼叫什麼。想讀檔就直接發 read_file，想改檔就直接發 edit_file。
 - 不要把工具呼叫寫成 markdown 或 JSON 範例貼在回覆裡。要呼叫就真的呼叫。
@@ -52,13 +52,13 @@ const LOCAL_DISCIPLINE = `（重要工作紀律）
 - 工具回你「找不到要替換的文字」就代表那次編輯沒生效，改用 write_file 整檔重寫，不要重複貼同樣的 old_str。
 - 只有在整個任務確實做完時，才用純文字做最後收尾；那一輪不要再發工具呼叫。`;
 
-// 子指令：login / status → 只回報認證狀態（借用 Claude Code，不需重新登入）
+// Subcommands: login / status → just report auth status (borrows Claude Code, no re-login needed)
 if (positional[0] === 'login' || positional[0] === 'status') {
   const s = await authStatus();
   if (s.ok) console.log(`✓ ${s.label} (mode: ${s.mode}). Run code-tree <project-path> to start.`);
   else {
     console.log(`✗ ${s.label}`);
-    // 沒雲端登入時，看看本機有沒有可直接用的模型 → 給零登入路徑，不要只叫人去登 Claude
+    // No cloud login: check whether a local model is ready → offer a zero-login path instead of just telling them to log into Claude
     const local = await detectLocalLLM({});
     if (local && local.model) {
       console.log(`✓ But a local model is ready: ${local.model} (${local.provider}, no login). Run code-tree --local <project-path> to use it.`);
@@ -74,11 +74,11 @@ const DEMO = flags.has('--demo');
 const target = DEMO ? path.join(REPO_ROOT, 'sample') : path.resolve(positional[0] || process.cwd());
 if (DEMO) resetSample(target);
 
-// ── 起 core（已在跑就連現有的）──
+// ── start core (reuse the existing one if it's already running) ──
 const alreadyRunning = await portInUse(WS_PORT);
 const core = alreadyRunning ? null : startCore({ root: target, port: WS_PORT, quiet: true });
 
-// 預設全部活在終端機裡，不彈瀏覽器。要看完整世界樹再用 --web 開那張網頁版。
+// By default everything lives in the terminal, no browser pops up. Use --web to open the full world-tree web view.
 if (flags.has('--web')) {
   setTimeout(() => exec(`open http://localhost:${core ? core.webPort : WEB_PORT}`), 700);
 }
@@ -91,7 +91,7 @@ function portInUse(port) {
   });
 }
 
-// ── 顏色 / tree helpers ──
+// ── color / tree helpers ──
 const STATUS = {
   idle: { color: 'gray', dot: '·' },
   active: { color: 'green', dot: '◉' },
@@ -139,28 +139,28 @@ function App() {
   const [view, setView] = useState('split'); // split | tree
   const [cells, setCells] = useState([]);
   const [activePath, setActivePath] = useState(null);
-  const [feed, setFeed] = useState([]); // transcript：使用者 prompt + agent 碰的檔
-  const [thinking, setThinking] = useState(''); // 串流中的思考文字（還沒收尾）
+  const [feed, setFeed] = useState([]); // transcript: user prompt + files the agent touched
+  const [thinking, setThinking] = useState(''); // streaming thinking text (not yet finalized)
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState('');
   const [authLabel, setAuthLabel] = useState('Checking login…');
   const [authOk, setAuthOk] = useState(false);
   const [notice, setNotice] = useState(DEMO ? '🎬 Demo mode: scripted agent replays scenario one' : '');
-  const [tok, setTok] = useState({ total: { burned: 0, all: 0 }, turn: { burned: 0 } }); // 即時用量
-  const [tier, setTier] = useState(null); // routed engine 的當前層：'local' → 'claude'
-  const [savings, setSavings] = useState(null); // 全機 cache 浪費（mercury 工具）
+  const [tok, setTok] = useState({ total: { burned: 0, all: 0 }, turn: { burned: 0 } }); // live usage
+  const [tier, setTier] = useState(null); // routed engine's current tier: 'local' → 'claude'
+  const [savings, setSavings] = useState(null); // machine-wide cache waste (mercury tool)
   const [savingBusy, setSavingBusy] = useState(false);
-  const [gate, setGate] = useState(null); // MASL 待核准：{ report, agentSaid }
-  const [visited, setVisited] = useState([]); // agent 走過的格子（依時間順序）→ 右 pane 流向圖
-  const [tick, setTick] = useState(0); // 動畫節拍：讓光球沿著線往下跑
+  const [gate, setGate] = useState(null); // MASL pending approval: { report, agentSaid }
+  const [visited, setVisited] = useState([]); // cells the agent visited (in time order) → right-pane flow diagram
+  const [tick, setTick] = useState(0); // animation beat: drives the light ball down the line
   const visitedRef = useRef([]);
   const wsRef = useRef(null);
   const agentRef = useRef(null);
   const thinkingRef = useRef('');
   const feedRef = useRef([]);
   const meterRef = useRef(createTokenMeter());
-  const stateRef = useRef({ cells: [], edges: [], root: target }); // 最新 snapshot（gate 算爆炸範圍用）
-  const gateResolveRef = useRef(null); // 目前那道關卡的 resolve（y/n 觸發）
+  const stateRef = useRef({ cells: [], edges: [], root: target }); // latest snapshot (used by gate to compute blast radius)
+  const gateResolveRef = useRef(null); // resolve for the current gate (triggered by y/n)
 
   function pushFeed(item) {
     feedRef.current = [...feedRef.current, item].slice(-200);
@@ -173,7 +173,7 @@ function App() {
     setThinking('');
   }
 
-  // 連 core
+  // connect to core
   useEffect(() => {
     const ws = new WebSocket(`ws://localhost:${WS_PORT}`);
     wsRef.current = ws;
@@ -187,10 +187,10 @@ function App() {
     return () => ws.close();
   }, []);
 
-  // 建 agent（demo → scripted 可重播；否則 SDK 借 Claude Code 登入）
+  // build the agent (demo → replayable scripted; otherwise SDK borrowing Claude Code login)
   useEffect(() => {
     (async () => {
-      // 可變的最終引擎與本機設定：預設沿用 ENGINE / baseURLArg，但下面可能因「沒登入」自動退回本機。
+      // Mutable final engine and local config: defaults to ENGINE / baseURLArg, but may fall back to local below if not logged in.
       let engine = ENGINE;
       let localCfg = { baseURL: baseURLArg, model: modelArg || 'qwen2.5-coder' };
 
@@ -198,18 +198,18 @@ function App() {
         setAuthOk(true);
         setAuthLabel('🎬 demo (no login needed)');
       } else if (engine === 'codex') {
-        // Codex 走 codex CLI 自己的 ChatGPT OAuth，狀態由 SDK 啟動時才知道，先樂觀標已連
+        // Codex uses the codex CLI's own ChatGPT OAuth; status is only known once the SDK starts, so optimistically mark connected
         setAuthOk(true);
         setAuthLabel('Codex login (ChatGPT OAuth)');
       } else if (engine === 'local') {
-        // 使用者明確要本機（--local / --engine=local）：偵測本機 server，填好 baseURL + model
+        // User explicitly wants local (--local / --engine=local): detect the local server, fill in baseURL + model
         const found = await detectLocalLLM({ preferModel: modelArg });
         if (found && found.model) {
           localCfg = { baseURL: found.baseURL, model: found.model };
           setAuthOk(true);
           setAuthLabel(`🖥 local · ${found.model} (${found.provider}, no login)`);
         } else if (found && !found.model) {
-          // server 在跑但沒裝模型
+          // server is running but no model installed
           setAuthOk(false);
           setAuthLabel(`🖥 ${found.provider} running but no model. Run: ollama pull qwen2.5-coder`);
         } else {
@@ -217,7 +217,7 @@ function App() {
           setAuthLabel('No local model found. Install Ollama + run: ollama pull qwen2.5-coder');
         }
       } else {
-        // 預設 claude：先看有沒有借到 Claude Code 登入；借不到就自動退回本機模型（零登入）。
+        // Default claude: first check if a Claude Code login can be borrowed; if not, fall back to a local model (zero login).
         const s = await authStatus();
         if (s.ok) {
           setAuthOk(true);
@@ -241,23 +241,23 @@ function App() {
         if (action === 'read' && wsRef.current?.readyState === 1) {
           wsRef.current.send(JSON.stringify({ type: 'agent_read', path: p }));
         }
-        // modify 由 core 的 file watcher 抓，不重複送
+        // modify is caught by core's file watcher, so don't send it twice
       };
       const onEvent = (e) => {
         if (e.type === 'text') {
           thinkingRef.current += e.delta;
           setThinking(thinkingRef.current.slice(-400));
         } else if (e.type === 'tool') {
-          flushThinking(); // 工具到了，先把這段思考收成一行
+          flushThinking(); // a tool arrived, so collapse this thinking into one line first
           pushFeed({ kind: 'tool', name: e.name, path: e.path });
         } else if (e.type === 'active' && e.path) {
           setActivePath(e.path);
-          // 走到新的一格才記一筆 → 右 pane 的流向圖就是 agent 的足跡鏈
+          // only record a step when moving to a new cell → the right-pane flow diagram is the agent's footprint chain
           if (visitedRef.current[visitedRef.current.length - 1] !== e.path) {
             visitedRef.current = [...visitedRef.current, e.path].slice(-40);
             setVisited(visitedRef.current);
           }
-          // 回報 agent 現在在哪一格 → core 廣播 → 瀏覽器世界樹鏡頭飛過去
+          // report which cell the agent is on now → core broadcasts → the browser world-tree camera flies over
           if (wsRef.current?.readyState === 1) {
             wsRef.current.send(JSON.stringify({ type: 'agent_active', path: e.path }));
           }
@@ -275,7 +275,7 @@ function App() {
         }
       };
 
-      // MASL 關卡：agent 要改檔/跑指令前，開核准面板，等開發者 y/n
+      // MASL gate: before the agent edits a file / runs a command, open the approval panel and wait for the dev's y/n
       const onGate = (report, agentSaid) => new Promise((resolve) => {
         gateResolveRef.current = resolve;
         setGate({ report, agentSaid });
@@ -304,7 +304,7 @@ function App() {
     })();
   }, []);
 
-  // 量測全機 cache 浪費（背景跑 python，不擋 UI）
+  // measure machine-wide cache waste (runs python in the background, doesn't block the UI)
   function refreshSavings() {
     if (savingBusy) return;
     setSavingBusy(true);
@@ -314,14 +314,14 @@ function App() {
     }).catch(() => setSavingBusy(false));
   }
 
-  // 開頭量一次，之後每 90 秒重量（cache 狀態會隨開發飄）
+  // measure once at startup, then re-measure every 90s (cache state drifts as you develop)
   useEffect(() => {
     refreshSavings();
     const t = setInterval(refreshSavings, 90 * 1000);
     return () => clearInterval(t);
   }, []);
 
-  // 動畫節拍：光球沿著連線往下跑（右 pane 流向圖用）
+  // animation beat: light ball runs down the connecting line (for the right-pane flow diagram)
   useEffect(() => {
     const t = setInterval(() => setTick((x) => (x + 1) % 1000), 140);
     return () => clearInterval(t);
@@ -343,11 +343,11 @@ function App() {
     });
   }
 
-  // 非 TTY（demo 自走 / CI）不開 raw mode，避免 Ink 崩潰
+  // Skip raw mode on non-TTY (self-running demo / CI) to avoid crashing Ink
   useInput(
     (ch, key) => {
       if (key.ctrl && ch === 'c') { core?.close(); app.exit(); process.exit(0); }
-      // MASL 關卡待決：只收 y（放行）/ n（擋下），其餘鍵全部忽略，不讓 agent 偷跑
+      // MASL gate pending: only accept y (allow) / n (block); ignore all other keys so the agent can't sneak ahead
       if (gate) {
         if (ch === 'y' || ch === 'Y' || key.return) {
           gateResolveRef.current?.(true);
@@ -362,7 +362,7 @@ function App() {
         }
         return;
       }
-      // Ctrl+L：清掉 / 重新量測 cache 浪費。Cosmos 量給你看，實際釋放在你的 agent 終端機按 /clear。
+      // Ctrl+L: clear / re-measure cache waste. Cosmos measures it for you; to actually release it, hit /clear in your agent's terminal.
       if (key.ctrl && ch === 'l') {
         const w = savings?.wasted_tokens || 0;
         const usd = savings?.clear_now_savings_usd || 0;
@@ -374,7 +374,7 @@ function App() {
           : '🧹 Re-measuring cache waste…');
         return;
       }
-      if (key.tab) { setView((v) => (v === 'split' ? 'tree' : 'split')); return; } // Tree View 隨時可切
+      if (key.tab) { setView((v) => (v === 'split' ? 'tree' : 'split')); return; } // Tree View can be toggled anytime
       if (busy) return;
       if (key.return) {
         const t = input.trim();
@@ -401,7 +401,7 @@ function App() {
   );
   const subhead = h(Text, { color: 'gray' }, `${target}　|　${fileCount} files · ${dirCount} folders`);
 
-  // ── transcript 單行 ──
+  // ── single transcript line ──
   function feedLine(it, i) {
     if (it.kind === 'user') return h(Text, { key: i, color: 'cyan', wrap: 'truncate-end' }, '› ' + it.text);
     if (it.kind === 'tool') {
@@ -412,8 +412,8 @@ function App() {
     return h(Text, { key: i, color: 'gray', wrap: 'truncate-end' }, it.text);
   }
 
-  // ── 右 pane：流向圖。agent 走過的格子由上往下串成一條鏈，
-  //    格子之間 100% 有線連著，最新那段線上有一顆光球往下跑 → 看得到流向跟順序。──
+  // ── right pane: flow diagram. The cells the agent visited are strung top-to-bottom into a chain;
+  //    every cell is always connected by a line, and a light ball runs down the newest segment → you can see the flow and order. ──
   function flowLines() {
     const shown = visited.slice(-10);
     const out = [];
@@ -422,7 +422,7 @@ function App() {
       out.push({ text: ' prompt, it grows where the agent goes.)', color: 'gray' });
       return out;
     }
-    const SEG = 3; // 每段連線畫幾列 → 光球在這幾列間移動
+    const SEG = 3; // how many rows each segment spans → the light ball moves across these rows
     shown.forEach((p, i) => {
       const c = cells.find((x) => x.path === p);
       const st = STATUS[(c && c.status) || 'idle'] || STATUS.idle;
@@ -434,7 +434,7 @@ function App() {
         color: here ? 'greenBright' : st.color, bold: here,
       });
       if (i < shown.length - 1) {
-        const activeEdge = i === shown.length - 2; // 最新跳的那一段 → 光球在這段流動
+        const activeEdge = i === shown.length - 2; // the most recent jump → the light ball flows along this segment
         for (let r = 0; r < SEG; r++) {
           const ball = activeEdge && tick % SEG === r;
           out.push({ text: '  ' + (ball ? '●' : '│'), color: ball ? 'greenBright' : 'gray' });
@@ -444,7 +444,7 @@ function App() {
     return out;
   }
 
-  // ── split view（預設）：左 transcript（終端機文字流），右流向圖 ──
+  // ── split view (default): transcript on the left (terminal text stream), flow diagram on the right ──
   function splitView() {
     const flow = flowLines();
     const feedLines = feed.slice(-16);
@@ -452,7 +452,7 @@ function App() {
     return h(
       Box,
       { flexDirection: 'row', marginTop: 1 },
-      // 左：agent transcript（打字、文字一直往上捲，跟 CLI 一樣）
+      // left: agent transcript (typing, text scrolls up, just like a CLI)
       h(Box, { flexDirection: 'column', flexGrow: 1, paddingRight: 1 },
         h(Text, { color: 'gray' }, 'agent'),
         feedLines.length ? feedLines.map((it, i) => feedLine(it, i))
@@ -461,7 +461,7 @@ function App() {
           ? h(Text, { color: 'yellow', wrap: 'truncate-end' }, thinking)
           : busy ? h(Text, { color: 'yellow' }, 'Thinking…') : null,
       ),
-      // 右：流向圖（agent 足跡鏈 + 光球）
+      // right: flow diagram (agent footprint chain + light ball)
       h(Box, {
           flexDirection: 'column', width: 34, paddingLeft: 1,
           borderStyle: 'single', borderColor: 'gray',
@@ -486,7 +486,7 @@ function App() {
     );
   }
 
-  // ── token 橫欄：本次開發用掉 / 正在用 / 總計 + 全機可清掉的浪費 ──
+  // ── token bar: burned this session / in use now / total + machine-wide clearable waste ──
   const wasteTok = savings?.wasted_tokens || 0;
   const clearUsd = savings?.clear_now_savings_usd || 0;
   const tokenBar = h(
@@ -512,7 +512,7 @@ function App() {
     ),
   );
 
-  // ── MASL 攔截面板：待核准時蓋在輸入區上方，紅框、列爆炸範圍 ──
+  // ── MASL intercept panel: when pending approval, overlays above the input area with a red border and lists the blast radius ──
   const SEV = { safe: 'green', caution: 'yellow', high: 'red', review: 'magenta' };
   const gatePanel = gate ? h(
     Box,

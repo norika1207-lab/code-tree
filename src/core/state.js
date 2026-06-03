@@ -1,4 +1,4 @@
-// 整個 codebase 的活的結構。對齊 spec 的資料模型：Cell / Edge / Activity。
+// The live structure of the whole codebase. Matches the spec's data model: Cell / Edge / Activity.
 import path from 'node:path';
 import fs from 'node:fs';
 import { ANOMALY, CODE_EXT } from '../config.js';
@@ -21,12 +21,12 @@ function countLines(filePath) {
 export class Graph {
   constructor(root) {
     this.root = root;
-    this.cells = new Map(); // id(絕對路徑) -> Cell
+    this.cells = new Map(); // id(absolute path) -> Cell
     this.edges = new Map(); // "from->to" -> Edge
-    this.activities = []; // 時間序事件，最多保留 500 筆
-    this.errorSeen = new Map(); // error message -> 次數
-    this.activePromptId = null; // 目前正在跑的 prompt，watcher 改檔時用來歸屬
-    this.bornSeq = 0; // 單調遞增：格子出生序，前端用來排「先後長出來」
+    this.activities = []; // time-ordered events, keep at most 500
+    this.errorSeen = new Map(); // error message -> count
+    this.activePromptId = null; // the prompt currently running; used to attribute file edits the watcher catches
+    this.bornSeq = 0; // monotonically increasing: cell birth order, used by the frontend to order "which grew first"
   }
 
   rel(absPath) {
@@ -37,7 +37,7 @@ export class Graph {
     if (this.cells.has(absPath)) return this.cells.get(absPath);
     const ext = path.extname(absPath);
     const rel = this.rel(absPath);
-    // 出生時間：現有檔案用檔案系統的建立 / 修改時間（還原真實先後），新檔用現在
+    // Birth time: existing files use the filesystem's create/modify time (to recover the true order), new files use now
     let bornAt = Date.now();
     try {
       const st = fs.statSync(absPath);
@@ -54,22 +54,22 @@ export class Graph {
       last_active_at: Date.now(),
       language: LANG[ext] || ext.replace('.', '') || 'txt',
       size_lines: countLines(absPath),
-      depth: rel.split(path.sep).length - 1, // 目錄深度
-      category: this.categoryOf(rel), // 功能類別 → 前端用來分層（同類同層）
-      born_at: bornAt, // 出生時間（先後順序）
-      born_seq: this.bornSeq++, // 本 session 內出生序，live 長出來時遞增
+      depth: rel.split(path.sep).length - 1, // directory depth
+      category: this.categoryOf(rel), // functional category → frontend layers by this (same category, same layer)
+      born_at: bornAt, // birth time (ordering)
+      born_seq: this.bornSeq++, // birth order within this session, incremented as cells grow live
       anomaly: null, // null | 'repeat' | 'stall' | 'error'
     };
     this.cells.set(absPath, cell);
     return cell;
   }
 
-  // 功能類別：取 root 底下的第一段功能目錄當分類（src/core→core、src/cli→cli、bin→bin…）
+  // Functional category: take the first functional directory under root as the category (src/core→core, src/cli→cli, bin→bin…)
   categoryOf(rel) {
     const parts = rel.split(path.sep);
-    if (parts.length === 1) return 'root'; // 專案根的散檔（config、入口）
-    if (parts[0] === 'src' && parts.length > 2) return parts[1]; // src/<功能>/…
-    return parts[0]; // bin / sample / 其他頂層目錄
+    if (parts.length === 1) return 'root'; // loose files at the project root (config, entry points)
+    if (parts[0] === 'src' && parts.length > 2) return parts[1]; // src/<feature>/…
+    return parts[0]; // bin / sample / other top-level directories
   }
 
   removeCell(absPath) {
@@ -82,7 +82,7 @@ export class Graph {
   }
 
   setImports(absPath, targets) {
-    // 先清掉這個檔案舊的 import 邊
+    // First clear this file's old import edges
     for (const key of [...this.edges.keys()]) {
       if (key.startsWith(absPath + '->')) this.edges.delete(key);
     }
@@ -97,7 +97,7 @@ export class Graph {
     return CODE_EXT.includes(path.extname(absPath));
   }
 
-  // 記一次活動並更新 cell 狀態。promptId 省略時用目前 active 的 prompt 歸屬。
+  // Record an activity and update the cell's status. When promptId is omitted, attribute to the currently active prompt.
   record(absPath, action, promptId = this.activePromptId) {
     const cell = this.ensureCell(absPath);
     const now = Date.now();
@@ -126,14 +126,14 @@ export class Graph {
     return cell;
   }
 
-  // 哪些 cell import 了 target（影響半徑用）
+  // Which cells import the target (used for the blast radius)
   importersOf(absPath) {
     const out = [];
     for (const e of this.edges.values()) if (e.to === absPath) out.push(e.from);
     return out;
   }
 
-  // 掃描卡住（active 太久沒變化）
+  // Scan for stalls (active too long with no change)
   checkStall() {
     const now = Date.now();
     const stalled = [];

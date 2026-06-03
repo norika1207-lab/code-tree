@@ -1,10 +1,10 @@
-// 給 agent 的檔案工具。每個動作都 emit 出去 → core → 樹上對應的格子亮起來/長出來。
-// 這就是「樹從 agent 走過 codebase 的軌跡長出來」的接點。
+// File tools for the agent. Every action is emitted → core → the matching cell on the tree lights up / grows.
+// This is the seam where "the tree grows out of the agent's trajectory across the codebase".
 import fs from 'node:fs';
 import path from 'node:path';
 import { CODE_EXT } from '../config.js';
 
-// 把工具給的相對路徑鎖在專案內，擋住 ../ 逃逸
+// Lock the tool's relative path inside the project, blocking ../ escapes
 function safeResolve(root, p) {
   const abs = path.resolve(root, p);
   if (abs !== root && !abs.startsWith(root + path.sep)) {
@@ -72,7 +72,7 @@ export const TOOL_DEFS = [
 const searchable = (name) =>
   CODE_EXT.includes(path.extname(name)) || /\.(json|md|txt|css|html)$/.test(name);
 
-// emit(action, relPath, extra) 由 caller 注入，負責回報給 core
+// emit(action, relPath, extra) is injected by the caller and reports back to core
 export function makeExecutor(root, emit) {
   const rel = (abs) => path.relative(root, abs) || path.basename(abs);
 
@@ -153,7 +153,7 @@ export function makeExecutor(root, emit) {
         }
       };
       walk(root);
-      for (const f of matchedFiles) emit('read', f); // 命中的格子在樹上亮起來
+      for (const f of matchedFiles) emit('read', f); // the matched cells light up on the tree
       return hits.length ? hits.join('\n') : `找不到符合「${q}」的內容`;
     }
 

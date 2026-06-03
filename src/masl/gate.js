@@ -1,13 +1,13 @@
-// MASL gate（純邏輯）：agent 要改檔之前，先算出「動這個檔會連累誰」（爆炸範圍），
-// 組成一份要給開發者看的報告。攔截 / 核准的 UI 在 CLI，這裡只負責算。
+// MASL gate (pure logic): before the agent edits a file, work out who that edit would take down with it (the blast radius),
+// and assemble a report for the developer. The intercept / approval UI lives in the CLI; this module only computes.
 //
-// 資料來源：CLI 從 core 收到的 snapshot（cells + edges）。
-//   cell  = { id: 絕對路徑, path: 相對路徑, ... }
-//   edge  = { from: 絕對路徑, to: 絕對路徑, type:'import' }  // from import 了 to
-// 所以「誰會壞」= 反向：誰 import 了我 → importers。沿著反向邊做傳遞閉包就是爆炸範圍。
+// Data source: the snapshot the CLI receives from core (cells + edges).
+//   cell  = { id: absolute path, path: relative path, ... }
+//   edge  = { from: absolute path, to: absolute path, type:'import' }  // from imports to
+// So "who breaks" = the reverse: who imports me → importers. Taking the transitive closure along reverse edges is the blast radius.
 import path from 'node:path';
 
-// 哪些工具是「動手改東西」→ 要過 gate。Read / list / grep 這種唯讀的放行。
+// Which tools "actually change things" → must pass the gate. Read-only ones like Read / list / grep are allowed through.
 const MUTATION_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'write_file', 'edit_file']);
 const SHELL_TOOLS = new Set(['Bash', 'bash']);
 
@@ -15,13 +15,13 @@ export function isMutation(toolName) {
   return MUTATION_TOOLS.has(toolName) || SHELL_TOOLS.has(toolName);
 }
 
-// 從 snapshot 建反向依賴索引。relById 把絕對路徑映回相對路徑。
+// Build a reverse-dependency index from the snapshot. relById maps absolute paths back to relative paths.
 export function buildDepIndex(cells = [], edges = [], root = '') {
   const relById = new Map();
   for (const c of cells) relById.set(c.id, c.path);
   const relOf = (abs) => relById.get(abs) || (root ? path.relative(root, abs) : abs);
 
-  const importersByRel = new Map(); // rel(被 import 的) -> Set(rel)（import 它的人）
+  const importersByRel = new Map(); // rel(the imported file) -> Set(rel) (the files that import it)
   for (const e of edges) {
     if (e.type && e.type !== 'import') continue;
     const toRel = relOf(e.to);
@@ -32,7 +32,7 @@ export function buildDepIndex(cells = [], edges = [], root = '') {
   return { relById, importersByRel };
 }
 
-// 傳遞閉包：改 startRel，會連累哪些檔（直接 + 間接 import 它的）。
+// Transitive closure: editing startRel, which files get dragged down (those that import it directly + indirectly).
 export function blastRadius(index, startRel) {
   const seen = new Set();
   const q = [startRel];
@@ -50,8 +50,8 @@ export function blastRadius(index, startRel) {
   return [...seen];
 }
 
-// 把一次工具呼叫評估成一份報告。input 形狀依工具不同：
-//   Write/Edit → file_path；write_file/edit_file → path；Bash → command（無明確檔）
+// Assess a single tool call into a report. The input shape varies by tool:
+//   Write/Edit → file_path; write_file/edit_file → path; Bash → command (no explicit file)
 export function assessTool({ index, toolName, input = {}, root = '' }) {
   const shell = SHELL_TOOLS.has(toolName);
   const rawPath = input.file_path ?? input.path ?? null;
@@ -59,7 +59,7 @@ export function assessTool({ index, toolName, input = {}, root = '' }) {
     ? (path.isAbsolute(rawPath) && root ? path.relative(root, rawPath) : rawPath)
     : null;
 
-  // Bash 沒有明確的目標檔 → 算不出爆炸範圍，標成「需人工看一眼」。
+  // Bash has no explicit target file → can't derive a blast radius, so mark it "needs a human look".
   if (shell) {
     return {
       tool: toolName,
@@ -68,13 +68,13 @@ export function assessTool({ index, toolName, input = {}, root = '' }) {
       command: (input.command || '').slice(0, 200),
       blast: [],
       blastCount: 0,
-      severity: 'review', // 指令可能砍檔/跑遷移，一律要開發者點頭
+      severity: 'review', // a command could delete files / run migrations, so always require the dev's nod
       reason: "This is a shell command. Its blast radius can't be derived from the dependency graph, so it needs your review.",
     };
   }
 
   const blast = targetRel ? blastRadius(index, targetRel) : [];
-  // 嚴重度：連累越多越紅。0 = 安全，1-2 = 注意，3+ = 高風險。
+  // Severity: the more it drags down, the redder. 0 = safe, 1-2 = caution, 3+ = high risk.
   const severity = blast.length === 0 ? 'safe' : blast.length <= 2 ? 'caution' : 'high';
   return {
     tool: toolName,
@@ -90,15 +90,15 @@ export function assessTool({ index, toolName, input = {}, root = '' }) {
   };
 }
 
-// ── 新判準（v2）：不要「判斷有問題就攔」，那會每次都跳、煩死人。──
-// 改成「預設閉嘴，只在這四種真的危險時才出聲」：
-//   1. 不可逆        shell 砍檔 / reset / push -f / migration / 覆寫重導
-//   2. 動到對外介面  改/刪了別人 import 的 export（不是改內部實作）
-//   3. 脫稿          嘴上說改 A，手卻去改 B
-//   4. 鬼打牆        同一個檔反覆改 + 同一個錯一直冒（原地打轉）
-// 爆炸範圍（blastRadius）不再單獨觸發攔截，降級成「背景燈號」放進 reason 補充。
+// ── New criteria (v2): don't "intercept whenever something looks off", that fires every time and is maddening. ──
+// Switched to "stay quiet by default, only speak up for these four genuinely dangerous cases":
+//   1. irreversible    shell deleting files / reset / push -f / migration / overwriting redirect
+//   2. touches public interface  edited/removed an export others import (not an internal implementation change)
+//   3. off-script      says it'll edit A but actually edits B
+//   4. thrashing       same file edited over and over + the same error keeps recurring (spinning in place)
+// blastRadius no longer triggers an intercept on its own; it's demoted to a "background signal" added to reason.
 
-// 危險 shell pattern：做了救不回來的那種。
+// Dangerous shell patterns: the kind you can't undo.
 const DANGEROUS_SHELL = [
   /\brm\s+-[rf]/i, /\brm\s+-rf?\b/i, /\brm\s+\//i,
   /git\s+reset\s+--hard/i, /git\s+push\s+[^|]*(-f\b|--force)/i,
@@ -107,8 +107,8 @@ const DANGEROUS_SHELL = [
   /\bmkfs\b/i, /\bdd\s+if=/i, /:\s*>\s*\S+/, /\bchmod\s+-R\b/i,
 ];
 
-// 從原始碼粗略抽出「對外 export」名稱 + 粗略簽名（function 抓參數個數）。
-// 不是完整 parser，夠用來判「介面有沒有變」。
+// Roughly extract public export names + a rough signature from source (for functions, the arg count).
+// Not a full parser, just enough to judge "did the interface change".
 export function extractExports(source = '') {
   const map = new Map();
   const add = (name, sig) => { if (name) map.set(name, sig || name); };
@@ -132,7 +132,7 @@ export function extractExports(source = '') {
   return map;
 }
 
-// 比對前後 export：回傳「被刪掉的」「簽名變了的」名單。新增的不算（不會弄壞既有依賴）。
+// Diff exports before vs after: return the lists of "removed" and "signature changed". Additions don't count (they won't break existing dependencies).
 export function diffExports(prevSource, nextSource) {
   const prev = extractExports(prevSource);
   const next = extractExports(nextSource);
@@ -145,14 +145,14 @@ export function diffExports(prevSource, nextSource) {
   return { removed, changed, breaking: removed.length + changed.length > 0 };
 }
 
-// 主判準。report = assessTool 的輸出（含爆炸範圍當背景）。ctx 帶這次動作的脈絡：
+// Main decision. report = assessTool's output (with blast radius as background). ctx carries this action's context:
 //   { prevSource, nextSource, declaredTarget, actualTarget, modCount, errorRecurring }
-// 回傳 { gate, category, reason, blast }（gate=true 才打斷人）。
+// Returns { gate, category, reason, blast } (only gate=true interrupts the human).
 export function decideGate(report, ctx = {}) {
   const blast = report.blast || [];
   const blastNote = report.blastCount > 0 ? `(background: ${report.blastCount} file(s) import it)` : '';
 
-  // 1. 不可逆 shell
+  // 1. irreversible shell
   if (report.kind === 'shell') {
     const cmd = report.command || '';
     const hit = DANGEROUS_SHELL.some((re) => re.test(cmd));
@@ -160,34 +160,34 @@ export function decideGate(report, ctx = {}) {
     return { gate: false, category: 'shell-safe', reason: 'Ordinary shell command, allowed.', blast };
   }
 
-  // 3. 脫稿：宣稱改 A 卻去改 B
+  // 3. off-script: claims to edit A but edits B instead
   const declared = ctx.declaredTarget;
   const actual = ctx.actualTarget || report.targetRel;
   if (declared && actual && declared !== actual) {
     return { gate: true, category: 'off-script', reason: `agent said it would edit ${declared} but is touching ${actual} instead, looks off-script.`, blast };
   }
 
-  // 4. 鬼打牆：反覆改 + 同錯一直冒（優先於「只改內部就放行」，因為原地打轉就算只動內部也該停）
+  // 4. thrashing: repeated edits + the same error recurring (takes priority over "internal-only is allowed", because spinning in place should stop even if only internals are touched)
   if ((ctx.modCount || 0) >= 4 && ctx.errorRecurring) {
     return { gate: true, category: 'thrashing', reason: `This file was edited ${ctx.modCount}x and the same error keeps recurring, looks like thrashing. Pause and try another approach.`, blast };
   }
 
-  // 2. 動到對外介面（刪/改 export）且真的有人依賴
+  // 2. touches the public interface (removed/changed export) and something actually depends on it
   if (ctx.prevSource != null && ctx.nextSource != null) {
     const d = diffExports(ctx.prevSource, ctx.nextSource);
     if (d.breaking && report.blastCount > 0) {
       const what = [...d.removed.map((n) => `removed ${n}`), ...d.changed.map((n) => `changed signature of ${n}`)].join(', ');
       return { gate: true, category: 'breaking-api', reason: `Touches the public interface (${what}), ${report.blastCount} dependent file(s) will break.`, blast };
     }
-    // 有改但只動內部 / 只新增 export → 閉嘴放行
+    // edited but only internals / only added exports → stay quiet and allow
     return { gate: false, category: 'internal-edit', reason: `Internal change only, public interface untouched, allowed ${blastNote}`, blast };
   }
 
-  // 其餘一律放行（預設閉嘴）
+  // everything else is allowed (quiet by default)
   return { gate: false, category: 'default-pass', reason: `None of the four red lines hit, allowed ${blastNote}`, blast };
 }
 
-// 給 CLI 渲染用：把報告壓成幾行文字。
+// For CLI rendering: flatten the report into a few lines of text.
 export function reportLines(report, agentSaid = '') {
   const lines = [];
   const head = report.kind === 'shell'

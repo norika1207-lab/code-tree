@@ -1,4 +1,4 @@
-// 軌跡記憶單元測試（無 GPU、無網路）：
+// Trajectory memory unit tests (no GPU, no network):
 //   node test/memory.test.mjs
 import assert from 'node:assert';
 import fs from 'node:fs';
@@ -13,27 +13,27 @@ function ok(name, cond) {
   pass++;
 }
 
-// ── 測 1：tokenize 中英混合 ──
+// ── Test 1: tokenize mixed Chinese/English ──
 {
   const t = tokenize('修 session 失效 bug');
-  ok('英數詞切出', t.has('session') && t.has('bug'));
-  ok('中文單字切出', t.has('修') && t.has('效'));
-  ok('中文 bigram 切出', t.has('失效'));
+  ok('alphanumeric words split out', t.has('session') && t.has('bug'));
+  ok('single Chinese chars split out', t.has('修') && t.has('效'));
+  ok('Chinese bigram split out', t.has('失效'));
 }
 
-// ── 測 2：overlap 打分 ──
+// ── Test 2: overlap scoring ──
 {
   const q = tokenize('session 失效');
-  ok('相關文字分數高', overlapScore(q, 'session 失效 修好了') >= overlapScore(q, '完全無關的內容'));
-  ok('無關文字 0 分', overlapScore(tokenize('xyz123'), '毫不相干') === 0);
+  ok('relevant text scores higher', overlapScore(q, 'session 失效 修好了') >= overlapScore(q, '完全無關的內容'));
+  ok('unrelated text scores 0', overlapScore(tokenize('xyz123'), '毫不相干') === 0);
 }
 
-// ── 測 3：record 寫入後 recall 撈得回來 ──
+// ── Test 3: after record writes, recall can fetch it back ──
 {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-'));
   const mem = createMemory({ root, model: 'test-model' });
 
-  ok('空記憶 recall 回空字串', mem.recall('任何任務') === '');
+  ok('empty memory recall returns empty string', mem.recall('任何任務') === '');
 
   mem.record({
     task: '登入後 session 偶發失效，修掉根因',
@@ -45,37 +45,37 @@ function ok(name, cond) {
   });
 
   const all = mem.loadAll();
-  ok('寫入一筆', all.length === 1 && all[0].model === 'test-model');
-  ok('filesModified 去重保留', all[0].filesModified.length === 1);
+  ok('one entry written', all.length === 1 && all[0].model === 'test-model');
+  ok('filesModified deduplicated', all[0].filesModified.length === 1);
 
   const r = mem.recall('session 失效要怎麼修');
-  ok('相似任務撈得回', r.includes('session') && r.includes('src/auth.js'));
-  ok('recall 帶做法摘要', r.includes('sessionId'));
+  ok('similar task is fetched back', r.includes('session') && r.includes('src/auth.js'));
+  ok('recall carries the approach summary', r.includes('sessionId'));
 
-  // 不相關任務不該撈到東西
-  ok('不相關任務 recall 空', mem.recall('幫我畫一個圓形按鈕的 CSS 動畫顏色漸層') === '');
+  // An unrelated task should fetch nothing
+  ok('unrelated task recall is empty', mem.recall('幫我畫一個圓形按鈕的 CSS 動畫顏色漸層') === '');
 
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-// ── 測 4：只撈「善終且改過檔」的軌跡 ──
+// ── Test 4: only fetch trajectories that "ended cleanly and modified files" ──
 {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-'));
   const mem = createMemory({ root });
-  // 沒善終的不算
+  // Didn't end cleanly: doesn't count
   mem.record({ task: 'fix 登入 timeout', filesModified: ['a.js'], endedCleanly: false, summary: '中途放棄' });
-  // 善終但沒改檔的不算
+  // Ended cleanly but modified no files: doesn't count
   mem.record({ task: 'fix 登入 timeout', filesModified: [], endedCleanly: true, summary: '只看沒改' });
-  // 善終且改過檔的才算
+  // Ended cleanly and modified files: counts
   mem.record({ task: 'fix 登入 timeout 問題', filesModified: ['login.js'], endedCleanly: true, summary: '加上 timeout 重試' });
 
   const r = mem.recall('登入 timeout');
-  ok('只撈善終且改過檔的', r.includes('login.js') && !r.includes('中途放棄') && !r.includes('只看沒改'));
+  ok('only fetch cleanly-ended, file-modifying ones', r.includes('login.js') && !r.includes('中途放棄') && !r.includes('只看沒改'));
 
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-// ── 測 5：壞掉的 JSONL 行不會炸掉 loadAll ──
+// ── Test 5: a broken JSONL line doesn't blow up loadAll ──
 {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-'));
   const dir = path.join(root, '.cosmos-tree');
@@ -83,7 +83,7 @@ function ok(name, cond) {
   fs.writeFileSync(path.join(dir, 'trajectories.jsonl'),
     '{"task":"好行","filesModified":["x.js"],"endedCleanly":true,"summary":"ok"}\n壞掉不是 json\n\n');
   const mem = createMemory({ root });
-  ok('壞行被跳過、好行保留', mem.loadAll().length === 1);
+  ok('bad lines skipped, good lines kept', mem.loadAll().length === 1);
 
   fs.rmSync(root, { recursive: true, force: true });
 }

@@ -1,12 +1,12 @@
-// Agent runner（在 core 跑）。讓瀏覽器當主介面：網頁透過 WS 送 prompt，
-// core 這邊跑 agent，把 agent 的每一步（思考文字 / 工具 / 改檔 / token / MASL 關卡）廣播回網頁。
-// 這是「圖像編輯器」的後端脊椎：agent 不再綁在終端機 CLI 裡。
+// Agent runner (runs in core). Lets the browser act as the main UI: the web page sends a prompt over WS,
+// core runs the agent here and broadcasts each of the agent's steps (thinking text / tool / file edit / token / MASL gate) back to the page.
+// This is the backend spine of the "graphical editor": the agent is no longer tied to the terminal CLI.
 //
 // makeAgent({ onEvent, emit, getState, onGate, lastSaid }) → { send(text) }
-//   注入式，預設給 SDK agent；測試時可換 scripted agent（不燒 token）。
-// broadcast(msg)：把訊息推給所有 WS client（CLI + 瀏覽器）。
+//   Injectable; defaults to the SDK agent, swappable for a scripted agent in tests (burns no token).
+// broadcast(msg): push a message to all WS clients (CLI + browser).
 
-// 即時 token 累加（input + output + cache write = 真的燒掉的；cache read 是省下的）
+// Live token accumulation (input + output + cache write = what's actually burned; cache read is what's saved)
 function makeMeter() {
   const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let turn = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -63,13 +63,13 @@ export function createRunner({ root, graph, broadcast, makeAgent }) {
       const cell = graph.record(resolveAbs(relPath), 'read');
       broadcast({ type: 'activity', payload: { path: cell.path, action: 'read', ts: Date.now() } });
     }
-    // modify / create 由 file watcher 抓，不重複送
+    // modify / create are caught by the file watcher, so don't send them again
   };
 
   const getState = () => graph.snapshot();
   const lastSaid = () => lastSaidBuf.trim().slice(-160);
 
-  // MASL 關卡：要動手前先廣播 gate 給網頁，等網頁回 gate_reply
+  // MASL gate: before taking action, broadcast the gate to the page and wait for its gate_reply
   const onGate = (report, agentSaid) => new Promise((resolve) => {
     const id = 'g_' + Date.now() + '_' + Math.random().toString(16).slice(2, 6);
     gatePending.set(id, resolve);
@@ -77,7 +77,7 @@ export function createRunner({ root, graph, broadcast, makeAgent }) {
   });
 
   function resolveAbs(rel) {
-    // agent 給的多半已是絕對路徑；相對的話補成專案內絕對路徑
+    // What the agent gives is usually already absolute; if relative, expand it to an in-project absolute path
     return rel.startsWith('/') ? rel : root.replace(/\/$/, '') + '/' + rel;
   }
 
@@ -102,7 +102,7 @@ export function createRunner({ root, graph, broadcast, makeAgent }) {
     }
   }
 
-  // 網頁回覆 MASL 關卡（放行 / 擋下）
+  // The page replies to the MASL gate (allow / block)
   function replyGate(id, approve) {
     const resolve = gatePending.get(id);
     if (resolve) { gatePending.delete(id); resolve(!!approve); }

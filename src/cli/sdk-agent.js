@@ -1,18 +1,18 @@
-// SDK 版 agent：用 @anthropic-ai/claude-agent-sdk 的 query() 取代手刻的 llm+loop+tools。
-// 我們只做一件事：訂閱事件流，把「現在動到哪個檔」翻譯成 CLI 的 onEvent，餵活樹。
-// 認證、工具執行、context、權限全由 SDK（借用 Claude Code 登入）處理。
+// SDK-based agent: use @anthropic-ai/claude-agent-sdk's query() instead of the hand-rolled llm+loop+tools.
+// We do just one thing: subscribe to the event stream and translate "which file is being touched now" into the CLI's onEvent, feeding the live tree.
+// Auth, tool execution, context, and permissions are all handled by the SDK (borrowing the Claude Code login).
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { buildDepIndex, assessTool, isMutation } from '../masl/gate.js';
 
-// onEvent 契約跟舊 agent 一致：{type:'text',delta} / {type:'tool',name,path,input}
+// onEvent contract matches the old agent: {type:'text',delta} / {type:'tool',name,path,input}
 //   / {type:'active',path} / {type:'turn_end'} / {type:'error',message} / {type:'usage',usage}
-// emit('read', relPath)：讀檔不是檔案系統事件，主動回報 core 讓那一格亮起來。
-// gate：MASL 關卡。要改檔 / 跑指令前先攔下來算爆炸範圍，交給開發者點頭。
-//   getState() → { cells, edges, root }（CLI 從 core 收到的最新 snapshot）
-//   onGate(report, agentSaid) → Promise<boolean>（true 放行 / false 擋下）
-//   lastSaid() → agent 最近講的一句話，當「為什麼要這樣改」的線索
+// emit('read', relPath): a read isn't a filesystem event, so actively report it to core to light up that cell.
+// gate: the MASL gate. Before changing a file / running a command, intercept to compute the blast radius and let the developer nod it through.
+//   getState() → { cells, edges, root } (the latest snapshot the CLI received from core)
+//   onGate(report, agentSaid) → Promise<boolean> (true to allow / false to block)
+//   lastSaid() → the agent's most recent sentence, used as a clue for "why change it this way"
 export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, lastSaid }) {
-  // MASL 攔截：唯讀工具直接放行；要動手的（Write/Edit/Bash…）先過關卡。
+  // MASL interception: read-only tools pass straight through; acting tools (Write/Edit/Bash…) go through the gate first.
   async function canUseTool(toolName, input) {
     if (!isMutation(toolName) || !onGate) return { behavior: 'allow', updatedInput: input };
     const st = getState?.() || { cells: [], edges: [], root };
@@ -30,8 +30,8 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
       prompt: userText,
       options: {
         cwd: root,
-        canUseTool, // MASL：用權限鉤子當最後一道關卡，不再 bypass
-        includePartialMessages: true, // 要逐字串流的「思考中」文字
+        canUseTool, // MASL: use the permission hook as the last gate, no more bypass
+        includePartialMessages: true, // want the char-by-char streaming "thinking" text
         ...(model ? { model } : {}),
       },
     });
@@ -44,15 +44,15 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
             onEvent({ type: 'text', delta: ev.delta.text });
           }
         } else if (msg.type === 'assistant') {
-          // 每一步推論的 token 用量 → 餵 CLI 的 token 橫欄（即時累加）
+          // each inference step's token usage → feed the CLI's token bar (accumulated live)
           if (msg.message?.usage) onEvent({ type: 'usage', usage: msg.message.usage });
           for (const block of msg.message.content || []) {
             if (block.type === 'tool_use') {
               const p = block.input?.file_path ?? block.input?.path ?? null;
               onEvent({ type: 'tool', name: block.name, path: p, input: block.input });
               if (p) {
-                onEvent({ type: 'active', path: p }); // 視角跳到這一格
-                if (block.name === 'Read') emit?.('read', p); // 讀檔 → 點亮 core 那格
+                onEvent({ type: 'active', path: p }); // view jumps to this cell
+                if (block.name === 'Read') emit?.('read', p); // a read → light up that cell in core
               }
             }
           }

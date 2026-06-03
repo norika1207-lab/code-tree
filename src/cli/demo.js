@@ -1,5 +1,5 @@
-// 情境一的可重播劇本：agent 在 session bug 上反覆改 session-store 三次（閃紅），
-// 才發現根因在 middleware。給 scripted LLM 用，也是 30 秒 demo 影片的素材。
+// Replayable script for scenario one: the agent edits session-store three times in a row over a session bug (flashing red)
+// before realizing the root cause is in middleware. For the scripted LLM, and also the material for the 30-second demo video.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -13,7 +13,7 @@ const ORIGINAL = {
   'src/user-service.js': "export function findUser(id) { return { id, name: 'demo' }; }\n",
 };
 
-// 把 sample 還原成初始狀態，讓 demo 每次都能重跑
+// Reset the sample to its initial state so the demo can be re-run every time
 export function resetSample(root) {
   for (const [rel, content] of Object.entries(ORIGINAL)) {
     const abs = path.join(root, rel);

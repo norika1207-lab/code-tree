@@ -1,6 +1,6 @@
-// Electron 外殼：把 core（file watcher + WS + agent runner）跟圖像編輯器（cosmos.html）
-// 包成一個雙擊就開的桌面 app。不用終端機、不用 npm。
-// 啟動流程：選一個專案資料夾 → 在 app 內起 core → 開視窗載入世界樹畫布。
+// Electron shell: wraps core (file watcher + WS + agent runner) and the visual editor (cosmos.html)
+// into a double-click-to-open desktop app. No terminal, no npm.
+// Startup flow: pick a project folder → start core inside the app → open a window loading the world-tree canvas.
 import { app, BrowserWindow, dialog, Menu, shell, ipcMain } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -23,7 +23,7 @@ process.on('unhandledRejection', (e) => logln('UNHANDLED', e && e.stack || e));
 let core = null;
 let win = null;
 
-// 記住上次開的專案，下次直接進
+// Remember the last opened project so we can go straight in next time
 function loadPrefs() {
   try { return JSON.parse(fs.readFileSync(PREF, 'utf8')); } catch { return {}; }
 }
@@ -41,8 +41,8 @@ async function pickProject() {
   return r.filePaths[0];
 }
 
-// 無專案模式用的監看根：app 自己的一個空資料夾。視覺化監看它（空的、輕），
-// 終端機卻開在家目錄，照常能用。不去遞迴掃整個 home。
+// Watch root for no-project mode: an empty folder owned by the app. The visualization watches it (empty, light),
+// while the terminal opens in the home directory and works as usual. Avoids recursively scanning all of home.
 function scratchRoot() {
   const dir = path.join(app.getPath('userData'), 'no-project');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -57,11 +57,11 @@ function startOn(root, opts = {}) {
     projectLabel: opts.label, noProject: !!opts.noProject, quiet: false,
   });
   logln('core webPort', core.webPort, 'wsPort', core.port);
-  if (opts.remember !== false) savePrefs({ lastProject: root });   // 只記真專案，不記無專案 scratch
+  if (opts.remember !== false) savePrefs({ lastProject: root });   // only remember real projects, not the no-project scratch
   return core;
 }
 
-// loadURL 可能比 web server listen 早一步，失敗就重試
+// loadURL may run a step ahead of the web server listening; retry on failure
 function loadWithRetry(url, tries = 30) {
   win.loadURL(url).catch(() => {
     if (tries > 0) setTimeout(() => loadWithRetry(url, tries - 1), 150);
@@ -76,7 +76,7 @@ function createWindow() {
     title: 'Code Tree',
     webPreferences: {
       contextIsolation: true, nodeIntegration: false,
-      preload: path.join(__dirname, 'preload.cjs'), // 露出 window.codetree 給底下那條列的按鈕用
+      preload: path.join(__dirname, 'preload.cjs'), // expose window.codetree for the buttons in the bottom bar
     },
   });
   win.on('closed', () => { win = null; });
@@ -89,12 +89,12 @@ function openProjectFlow(root, opts = {}) {
   if (win) win.setTitle('Code Tree · ' + (opts.label || path.basename(root)));
 }
 
-// 不選專案，只要一個終端機：終端機開在家目錄，視覺化先空著等你動檔。
+// No project, just a terminal: the terminal opens in the home directory, and the visualization stays empty until you touch a file.
 function openNoProject() {
   openProjectFlow(scratchRoot(), { terminalCwd: os.homedir(), label: '無專案', noProject: true, remember: false });
 }
 
-// 底下那條列的按鈕 → 透過 preload 打到這裡
+// Buttons in the bottom bar → reach here via preload
 ipcMain.handle('ct:pick-project', async () => {
   const root = await pickProject();
   if (root) openProjectFlow(root);
@@ -143,20 +143,20 @@ app.whenReady().then(async () => {
   logln('app ready, userData=', app.getPath('userData'));
   buildMenu();
   createWindow();
-  // 先給一個歡迎畫面，避免空白視窗
+  // show a welcome screen first to avoid a blank window
   win.loadFile(path.join(__dirname, 'welcome.html'));
   const prefs = loadPrefs();
-  // 開機自動帶專案的優先序：
-  //   1. env（從 `codetree [dir]` launcher 帶進來的當前目錄）
-  //   2. 上次開的專案（路徑當下確實存在）
-  //   3. 彈選擇器讓使用者挑（不會偷偷掉進空 scratch，右邊樹至少要有東西長出來）
-  // 規矩：絕不在啟動就靜默開無專案模式。無專案是「使用者明確點按鈕」才會進的狀態，
-  // 不是 fallback。空 scratch 資料夾沒有 cell，右邊一定空白，看起來像產品壞掉。
+  // Priority for auto-loading a project at startup:
+  //   1. env (the current dir passed in by the `codetree [dir]` launcher)
+  //   2. the last opened project (if its path still exists)
+  //   3. pop the picker and let the user choose (won't silently drop into an empty scratch; the right-side tree must have something growing)
+  // Rule: never silently enter no-project mode at startup. No-project is a state you enter only when "the user explicitly clicks the button",
+  // not a fallback. An empty scratch folder has no cells, so the right side is always blank and looks like the product is broken.
   const envRoot = process.env.CODE_TREE_ROOT;
   let root = envRoot && fs.existsSync(envRoot) ? envRoot
     : (prefs.lastProject && fs.existsSync(prefs.lastProject) ? prefs.lastProject : null);
   if (root) { openProjectFlow(root); return; }
-  // 沒有可用專案：彈選擇器。使用者取消才退到無專案（這是他自己選的，不是預設）。
+  // No usable project: pop the picker. Only fall back to no-project if the user cancels (their own choice, not the default).
   logln('no env/lastProject, prompting picker');
   const picked = await pickProject();
   if (picked) openProjectFlow(picked);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// `codetree [專案路徑]`：在終端機任何專案裡打這個，圖像編輯器就開在那個專案上。
-// 像 `code .` 一樣。沒給路徑 → 用當前目錄。把目標目錄用 env 帶進 Electron，
-// main.js 讀 CODE_TREE_ROOT 就直接開，不彈選擇器。
+// `codetree [project-path]`: run this in any project in the terminal and the visual editor opens on that project.
+// Works like `code .`. No path given → use the current directory. The target directory is passed into Electron via env,
+// and main.js reads CODE_TREE_ROOT to open straight away without showing a picker.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// 目標專案：第一個非 flag 參數，否則當前工作目錄
+// Target project: the first non-flag argument, otherwise the current working directory
 const arg = process.argv.slice(2).find((a) => !a.startsWith('-'));
 const target = path.resolve(arg || process.cwd());
 if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
@@ -20,7 +20,7 @@ if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
 }
 
 let electronBin;
-try { electronBin = require('electron'); } // electron 套件 export 出 binary 路徑
+try { electronBin = require('electron'); } // the electron package exports the binary path
 catch { console.error('找不到 electron，先在 ' + appRoot + ' 跑 `npm install`'); process.exit(1); }
 
 const child = spawn(electronBin, [appRoot], {

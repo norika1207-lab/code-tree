@@ -1,9 +1,9 @@
-// LLM 抽象。agent.js 只認得 llm.run(...)，不管底下是真 Claude 還是 scripted。
+// LLM abstraction. agent.js only knows llm.run(...), regardless of whether it's real Claude or scripted underneath.
 // run({ system, messages, tools, onText }) -> { content: [blocks], stop_reason }
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const API_VERSION = '2023-06-01';
 const OAUTH_BETA = 'oauth-2025-04-20';
-// OAuth token 綁 Claude Code 身分，system 第一塊必須是這句，否則 API 會拒。
+// The OAuth token is bound to the Claude Code identity, so the first system block must be this sentence or the API rejects it.
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 export function createClaudeLLM({ getAuth, model = 'claude-sonnet-4-6', maxTokens = 8000 }) {
@@ -83,8 +83,8 @@ async function parseSSE(res, onText) {
   return { content: blocks.filter(Boolean), stop_reason: stopReason };
 }
 
-// ── Scripted：給 demo / 離線驗證。把預先寫好的 assistant 回合一個個吐出來。──
-// script: [{ text?, tools?:[{name,input}], stop_reason }] 依序消耗
+// ── Scripted: for demos / offline verification. Emit pre-written assistant turns one by one. ──
+// script: [{ text?, tools?:[{name,input}], stop_reason }] consumed in order
 export function createScriptedLLM(script) {
   let i = 0;
   return {
@@ -93,7 +93,7 @@ export function createScriptedLLM(script) {
       if (turn.text) {
         for (const ch of turn.text) {
           onText?.(ch);
-          await new Promise((r) => setTimeout(r, 8)); // 模擬串流
+          await new Promise((r) => setTimeout(r, 8)); // simulate streaming
         }
       }
       const content = [];

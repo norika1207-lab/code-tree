@@ -1,5 +1,5 @@
-// 本機單元測試（無 GPU）：mock 掉 fetch，餵 vLLM 風格的 OpenAI SSE，
-// 驗 createLocalLLM 的三道翻譯都對。
+// Local unit tests (no GPU): mock out fetch, feed vLLM-style OpenAI SSE,
+// and verify all three translation layers of createLocalLLM are correct.
 //   node test/local-llm.test.mjs
 import assert from 'node:assert';
 import { createLocalLLM, toOpenAITools, toOpenAIMessages, extractHermesToolCalls, extractJsonToolCalls, lenientRecover, computeConfidence } from '../src/cli/local-llm.js';
@@ -11,13 +11,13 @@ function ok(name, cond) {
   pass++;
 }
 
-// 把字串切成多個 chunk，模擬串流分段（含 tool_call arguments 跨 chunk）
+// Split a string into multiple chunks to simulate streaming (including tool_call arguments spanning chunks)
 function sse(lines) {
   return lines.map((l) => `data: ${typeof l === 'string' ? l : JSON.stringify(l)}\n\n`).join('');
 }
 function streamResponse(text) {
   const enc = new TextEncoder();
-  // 故意切碎，逼出累積邏輯的 bug
+  // Deliberately chop it up to flush out bugs in the accumulation logic
   const pieces = [];
   for (let i = 0; i < text.length; i += 7) pieces.push(text.slice(i, i + 7));
   return {
@@ -29,18 +29,18 @@ function streamResponse(text) {
   };
 }
 
-// ── 測 1：工具 schema 轉換 ──
+// ── Test 1: tool schema conversion ──
 {
   const TOOL_DEFS = [
     { name: 'read_file', description: '讀檔', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
   ];
   const oa = toOpenAITools(TOOL_DEFS);
-  ok('tools -> function 包裝', oa[0].type === 'function');
-  ok('tools name 保留', oa[0].function.name === 'read_file');
+  ok('tools wrapped as function', oa[0].type === 'function');
+  ok('tools name preserved', oa[0].function.name === 'read_file');
   ok('input_schema -> parameters', oa[0].function.parameters.required[0] === 'path');
 }
 
-// ── 測 2：訊息歷史轉換（含 tool_use / tool_result）──
+// ── Test 2: message history conversion (including tool_use / tool_result) ──
 {
   const system = 'you are a coding agent';
   const messages = [
@@ -58,17 +58,17 @@ function streamResponse(text) {
     },
   ];
   const oa = toOpenAIMessages(system, messages);
-  ok('system 在最前', oa[0].role === 'system');
-  ok('user 字串原樣', oa[1].role === 'user' && oa[1].content === '修 bug');
+  ok('system goes first', oa[0].role === 'system');
+  ok('user string passed through as-is', oa[1].role === 'user' && oa[1].content === '修 bug');
   const asst = oa.find((m) => m.role === 'assistant');
-  ok('assistant text 併入 content', asst.content.includes('我先讀檔'));
+  ok('assistant text merged into content', asst.content.includes('我先讀檔'));
   ok('tool_use -> tool_calls', asst.tool_calls[0].id === 'tu_1' && asst.tool_calls[0].function.name === 'read_file');
-  ok('arguments 是 JSON 字串', JSON.parse(asst.tool_calls[0].function.arguments).path === 'a.js');
+  ok('arguments is a JSON string', JSON.parse(asst.tool_calls[0].function.arguments).path === 'a.js');
   const toolMsg = oa.find((m) => m.role === 'tool');
   ok('tool_result -> role tool', toolMsg.tool_call_id === 'tu_1' && toolMsg.content === 'file body');
 }
 
-// ── 測 3：純文字串流 -> end_turn ──
+// ── Test 3: plain text streaming -> end_turn ──
 await (async () => {
   globalThis.fetch = async () => streamResponse(sse([
     { choices: [{ delta: { content: '你好' }, finish_reason: null }] },
@@ -79,12 +79,12 @@ await (async () => {
   const llm = createLocalLLM({ baseURL: 'http://x/v1', model: 'm' });
   let streamed = '';
   const r = await llm.run({ system: 's', messages: [{ role: 'user', content: 'hi' }], tools: [], onText: (t) => (streamed += t) });
-  ok('text block 拼回', r.content[0].type === 'text' && r.content[0].text === '你好，世界');
-  ok('onText 有串流', streamed === '你好，世界');
+  ok('text block reassembled', r.content[0].type === 'text' && r.content[0].text === '你好，世界');
+  ok('onText streamed', streamed === '你好，世界');
   ok('stop_reason end_turn', r.stop_reason === 'end_turn');
 })();
 
-// ── 測 4：tool_call 串流（arguments 跨 chunk）-> tool_use ──
+// ── Test 4: tool_call streaming (arguments span chunks) -> tool_use ──
 await (async () => {
   globalThis.fetch = async () => streamResponse(sse([
     { choices: [{ delta: { content: '讓我寫檔' }, finish_reason: null }] },
@@ -95,23 +95,23 @@ await (async () => {
   ]));
   const llm = createLocalLLM({ baseURL: 'http://x/v1', model: 'm' });
   const r = await llm.run({ system: 's', messages: [{ role: 'user', content: 'go' }], tools: [{ name: 'write_file', input_schema: {} }] });
-  ok('文字+工具同回合', r.content[0].type === 'text' && r.content.some((b) => b.type === 'tool_use'));
+  ok('text + tool in same turn', r.content[0].type === 'text' && r.content.some((b) => b.type === 'tool_use'));
   const tu = r.content.find((b) => b.type === 'tool_use');
-  ok('tool_use id 保留', tu.id === 'call_9' && tu.name === 'write_file');
-  ok('arguments 跨 chunk 拼回', tu.input.path === 'out.js' && tu.input.content === 'hi');
+  ok('tool_use id preserved', tu.id === 'call_9' && tu.name === 'write_file');
+  ok('arguments reassembled across chunks', tu.input.path === 'out.js' && tu.input.content === 'hi');
   ok('stop_reason tool_use', r.stop_reason === 'tool_use');
 })();
 
-// ── 測 5：Hermes 模板後備（ollama 串流會把 <tool_call> 當純文字吐）──
+// ── Test 5: Hermes template fallback (ollama streaming emits <tool_call> as plain text) ──
 {
   const leaked = '我來讀檔。\n<tool_call>\n{"name":"read_file","arguments":{"path":"config.json"}}\n</tool_call>';
   const r = extractHermesToolCalls(leaked);
-  ok('挖出工具名', r.calls[0].name === 'read_file');
-  ok('挖出參數', r.calls[0].input.path === 'config.json');
-  ok('剝掉模板留下乾淨文字', r.cleaned === '我來讀檔。');
+  ok('tool name extracted', r.calls[0].name === 'read_file');
+  ok('arguments extracted', r.calls[0].input.path === 'config.json');
+  ok('template stripped, clean text remains', r.cleaned === '我來讀檔。');
 }
 
-// ── 測 6：串流模式下的 Hermes 後備（開頭標籤被切碎）走完整 run() ──
+// ── Test 6: Hermes fallback in streaming mode (opening tag chopped up) through a full run() ──
 await (async () => {
   globalThis.fetch = async () => streamResponse(sse([
     { choices: [{ delta: { content: '讓我看看。\n' }, finish_reason: null }] },
@@ -123,30 +123,30 @@ await (async () => {
   const llm = createLocalLLM({ baseURL: 'http://x/v1', model: 'm' });
   const r = await llm.run({ system: 's', messages: [{ role: 'user', content: 'go' }], tools: [{ name: 'write_file', input_schema: {} }] });
   const tu = r.content.find((b) => b.type === 'tool_use');
-  ok('後備在串流路徑生效', !!tu && tu.name === 'write_file' && tu.input.path === 'a.js');
-  ok('後備觸發 stop_reason tool_use', r.stop_reason === 'tool_use');
+  ok('fallback works on the streaming path', !!tu && tu.name === 'write_file' && tu.input.path === 'a.js');
+  ok('fallback triggers stop_reason tool_use', r.stop_reason === 'tool_use');
   const txt = r.content.find((b) => b.type === 'text');
-  ok('後備保留前導文字', txt && txt.text === '讓我看看。');
+  ok('fallback keeps leading text', txt && txt.text === '讓我看看。');
 })();
 
-// ── 測 7：裸 JSON / ```json 工具呼叫後備（qwen2.5-coder 這樣吐）──
+// ── Test 7: bare JSON / ```json tool-call fallback (how qwen2.5-coder emits them) ──
 {
   const fenced = '好的，讓我先查看。\n```json\n{\n  "name": "list_dir",\n  "arguments": {"path": "src"}\n}\n```';
   const r = extractJsonToolCalls(fenced, ['list_dir', 'read_file']);
-  ok('圍欄 JSON 挖出工具', r.calls[0].name === 'list_dir' && r.calls[0].input.path === 'src');
-  ok('圍欄剝掉留下文字', r.cleaned === '好的，讓我先查看。');
+  ok('fenced JSON extracts the tool', r.calls[0].name === 'list_dir' && r.calls[0].input.path === 'src');
+  ok('fence stripped, text remains', r.cleaned === '好的，讓我先查看。');
 
   const bare = '{"name":"read_file","arguments":{"path":"a.js"}}';
   const r2 = extractJsonToolCalls(bare, ['read_file']);
-  ok('裸 JSON 挖出工具', r2.calls[0].name === 'read_file' && r2.calls[0].input.path === 'a.js');
+  ok('bare JSON extracts the tool', r2.calls[0].name === 'read_file' && r2.calls[0].input.path === 'a.js');
 
-  // 不是已知工具名的 JSON 不該被誤判成工具呼叫
+  // JSON whose name isn't a known tool should not be misread as a tool call
   const notCall = '這是答案：{"name":"小明","arguments":"無關"}';
   const r3 = extractJsonToolCalls(notCall, ['read_file']);
-  ok('非工具名 JSON 不誤判', r3.calls.length === 0);
+  ok('non-tool-name JSON not misclassified', r3.calls.length === 0);
 }
 
-// ── 測 8：串流吐 ```json 工具呼叫，走完整 run() ──
+// ── Test 8: streaming emits a ```json tool call, through a full run() ──
 await (async () => {
   globalThis.fetch = async () => streamResponse(sse([
     { choices: [{ delta: { content: '先看目錄。\n```json\n{"name":"list_dir",' }, finish_reason: null }] },
@@ -157,11 +157,11 @@ await (async () => {
   const llm = createLocalLLM({ baseURL: 'http://x/v1', model: 'm' });
   const r = await llm.run({ system: 's', messages: [{ role: 'user', content: 'go' }], tools: [{ name: 'list_dir', input_schema: {} }] });
   const tu = r.content.find((b) => b.type === 'tool_use');
-  ok('串流圍欄 JSON 後備生效', !!tu && tu.name === 'list_dir' && tu.input.path === 'src');
-  ok('串流圍欄觸發 tool_use', r.stop_reason === 'tool_use');
+  ok('streaming fenced-JSON fallback works', !!tu && tu.name === 'list_dir' && tu.input.path === 'src');
+  ok('streaming fence triggers tool_use', r.stop_reason === 'tool_use');
 })();
 
-// ── 測 9：後端 5xx（壞 tool-call JSON）會重試，下一次成功就接住 ──
+// ── Test 9: backend 5xx (bad tool-call JSON) retries, then catches the next success ──
 await (async () => {
   let calls = 0;
   globalThis.fetch = async () => {
@@ -175,10 +175,10 @@ await (async () => {
   };
   const llm = createLocalLLM({ baseURL: 'http://x/v1', model: 'm', maxRetries: 2 });
   const r = await llm.run({ system: 's', messages: [{ role: 'user', content: 'go' }], tools: [] });
-  ok('5xx 後重試成功', calls === 2 && r.content[0]?.text === '好了');
+  ok('retry succeeds after 5xx', calls === 2 && r.content[0]?.text === '好了');
 })();
 
-// ── 測 10：4xx 不重試，直接丟 ──
+// ── Test 10: 4xx does not retry, throws immediately ──
 await (async () => {
   let calls = 0;
   globalThis.fetch = async () => { calls++; return { ok: false, status: 400, text: async () => 'bad request' }; };
@@ -186,68 +186,68 @@ await (async () => {
   let threw = false;
   try { await llm.run({ system: 's', messages: [{ role: 'user', content: 'go' }], tools: [] }); }
   catch { threw = true; }
-  ok('4xx 不重試直接丟', threw && calls === 1);
+  ok('4xx throws without retrying', threw && calls === 1);
 })();
 
-// ── 測 11：寬容復原——content 含未跳脫換行、嚴格 parse 會炸，但仍救回 write_file ──
+// ── Test 11: lenient recovery — content has unescaped newlines so strict parse blows up, but write_file is still recovered ──
 {
   const bad = '{"name": "write_file", "arguments": {"path": "src/auth.js", "content": "line1\nline2"}}';
-  assert.throws(() => JSON.parse(bad)); // 確認嚴格 parse 真的失敗
+  assert.throws(() => JSON.parse(bad)); // confirm strict parse really does fail
   const r = lenientRecover(bad, new Set(['write_file']));
-  ok('寬容復原 write_file 名稱', r && r.call.name === 'write_file');
-  ok('寬容復原抓對 path', r.call.input.path === 'src/auth.js');
-  ok('寬容復原還原換行', r.call.input.content === 'line1\nline2');
+  ok('lenient recovery gets write_file name', r && r.call.name === 'write_file');
+  ok('lenient recovery gets the right path', r.call.input.path === 'src/auth.js');
+  ok('lenient recovery restores newlines', r.call.input.content === 'line1\nline2');
 }
 
-// ── 測 12：寬容復原——被 max_tokens 截斷的 write_file（content 收不了尾）也救得回 ──
+// ── Test 12: lenient recovery — a write_file truncated by max_tokens (content never closes) is still recovered ──
 {
   const truncated = '{"name":"write_file","arguments":{"path":"a.js","content":"import x from \'y\';\nconst z = 1; // 還沒寫完就被截';
   const r = lenientRecover(truncated, new Set(['write_file']));
-  ok('截斷的 write_file 仍救回', r && r.call.name === 'write_file' && r.call.input.path === 'a.js');
-  ok('截斷 content 整段拿來', r.call.input.content.includes('import x'));
+  ok('truncated write_file still recovered', r && r.call.name === 'write_file' && r.call.input.path === 'a.js');
+  ok('truncated content taken as a whole', r.call.input.content.includes('import x'));
 }
 
-// ── 測 13：模型誤用被藏掉的 edit_file 但塞 content，重映射成 write_file ──
+// ── Test 13: model misuses a hidden edit_file but passes content, remapped to write_file ──
 {
   const wrong = '{"name":"edit_file","arguments":{"path":"src/m.js","content":"export const a = 1;"}}';
-  const r = lenientRecover(wrong, new Set(['write_file'])); // edit_file 不在已知集合
-  ok('edit_file+content 重映射成 write_file', r && r.call.name === 'write_file');
-  ok('重映射保留 path/content', r.call.input.path === 'src/m.js' && r.call.input.content === 'export const a = 1;');
+  const r = lenientRecover(wrong, new Set(['write_file'])); // edit_file is not in the known set
+  ok('edit_file+content remapped to write_file', r && r.call.name === 'write_file');
+  ok('remap preserves path/content', r.call.input.path === 'src/m.js' && r.call.input.content === 'export const a = 1;');
 }
 
-// ── 測 14：一般 JSON 回答（沒有 tool name）不被誤判成工具呼叫 ──
+// ── Test 14: an ordinary JSON answer (no tool name) is not misread as a tool call ──
 {
   const plain = '{"answer": 42, "reason": "because"}';
-  ok('純資料 JSON 不誤判', lenientRecover(plain, new Set(['write_file'])) === null);
+  ok('pure-data JSON not misclassified', lenientRecover(plain, new Set(['write_file'])) === null);
 }
 
-// ── 測 15：extractJsonToolCalls 串接寬容復原——壞 JSON 寫檔呼叫整條鏈救回 ──
+// ── Test 15: extractJsonToolCalls chained with lenient recovery — a bad-JSON write_file call recovered through the whole chain ──
 {
   const text = '我來修這個檔：\n{"name": "write_file", "arguments": {"path": "f.js", "content": "a\nb\nc"}}';
   const { calls } = extractJsonToolCalls(text, ['write_file']);
-  ok('解析鏈最終救回壞 JSON 寫檔', calls.length === 1 && calls[0].name === 'write_file' && calls[0].input.content === 'a\nb\nc');
+  ok('parse chain ultimately recovers bad-JSON write_file', calls.length === 1 && calls[0].name === 'write_file' && calls[0].input.content === 'a\nb\nc');
 }
 
-// ── 測 16：computeConfidence——真的吐了工具，wantedToolMass=1、hadTool=true ──
+// ── Test 16: computeConfidence — a tool was actually emitted, wantedToolMass=1, hadTool=true ──
 {
   const c = computeConfidence([-0.1, -0.2], { token: '{', logprob: -0.1, top: [] }, true);
-  ok('有工具呼叫時信心標記正確', c.hadTool === true && c.wantedToolMass === 1 && c.nTokens === 2);
+  ok('confidence flags correct when a tool call exists', c.hadTool === true && c.wantedToolMass === 1 && c.nTokens === 2);
 }
 
-// ── 測 17：narrate-instead-of-call——沒呼叫工具，但第一個 token 候選裡 { 有可觀質量 ──
+// ── Test 17: narrate-instead-of-call — no tool was called, but { has notable mass among the first token's candidates ──
 {
-  // 第一個 token 抽到散文，但 top 候選包含 '{'（logprob -0.7 ≈ 0.50 質量）跟 '```'（-2.3 ≈ 0.10）
+  // The first token sampled prose, but the top candidates include '{' (logprob -0.7 ≈ 0.50 mass) and '```' (-2.3 ≈ 0.10)
   const firstTok = { token: 'I', logprob: -1.2, top: [
     { token: 'I', logprob: -1.2 }, { token: '{', logprob: -0.7 }, { token: '```', logprob: -2.3 },
   ] };
   const c = computeConfidence([-1.2, -0.5], firstTok, false);
-  ok('沒呼叫工具時 wantedToolMass 抓到 { 與 ``` 的質量', c.hadTool === false && c.wantedToolMass > 0.55 && c.wantedToolMass < 0.65);
+  ok('with no tool call, wantedToolMass captures the mass of { and ```', c.hadTool === false && c.wantedToolMass > 0.55 && c.wantedToolMass < 0.65);
 }
 
-// ── 測 18：空 logprobs（沒開或後端沒給）——回傳 null 欄位不炸 ──
+// ── Test 18: empty logprobs (disabled or not returned by the backend) — returns null fields without crashing ──
 {
   const c = computeConfidence([], null, false);
-  ok('無 logprobs 時安全回退', c.nTokens === 0 && c.meanLogprob === null && c.minLogprob === null && c.wantedToolMass === 0);
+  ok('safe fallback when no logprobs', c.nTokens === 0 && c.meanLogprob === null && c.minLogprob === null && c.wantedToolMass === 0);
 }
 
 console.log(`\n全部通過：${pass} 項`);

@@ -1,15 +1,15 @@
-// 借用 Claude Code 已登入的 OAuth session。
-// macOS：token 存在 Keychain service "Claude Code-credentials"。
-// 我們在「你的機器、執行時」才讀，token 不會離開本機。
+// Borrow the OAuth session Claude Code is already logged into.
+// macOS: the token lives in the Keychain service "Claude Code-credentials".
+// We only read it "on your machine, at runtime"; the token never leaves the local machine.
 import { execFileSync } from 'node:child_process';
 
-// Claude Code 公開 OAuth client（refresh / 重新登入時用）。
-// 若哪天端點變了，refresh 會失敗，改回 Claude Code 重新登入即可。
+// Claude Code's public OAuth client (used for refresh / re-login).
+// If the endpoint ever changes, refresh will fail; just log in again through Claude Code.
 const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 
-// 從巢狀物件裡撈出 token 欄位，容忍不同版本的結構
+// Pull the token fields out of the nested object, tolerating different version structures
 function pluck(obj) {
   const o = obj?.claudeAiOauth || obj?.oauth || obj || {};
   const accessToken = o.accessToken || o.access_token || obj.accessToken;
@@ -43,7 +43,7 @@ function writeKeychain(tokens) {
       { stdio: 'ignore' }
     );
   } catch {
-    /* 寫不回去不致命，下次 refresh 再換 */
+    /* failing to write back isn't fatal; it'll be replaced on the next refresh */
   }
 }
 
@@ -66,7 +66,7 @@ async function refresh(refreshToken) {
   };
 }
 
-// 回傳目前可用的認證。優先借 Claude Code session，其次 ANTHROPIC_API_KEY。
+// Return the currently usable auth. Prefer borrowing the Claude Code session, then ANTHROPIC_API_KEY.
 // { mode:'oauth', token } | { mode:'apikey', token } | null
 export async function getAuth() {
   let kc = readKeychain();
@@ -77,7 +77,7 @@ export async function getAuth() {
         kc = await refresh(kc.refreshToken);
         writeKeychain(kc);
       } catch {
-        /* refresh 不成就先用舊的，真的過期 API 會回 401，再提示重登 */
+        /* if refresh fails, use the old one for now; if it's truly expired the API returns 401 and we prompt for re-login */
       }
     }
     return { mode: 'oauth', token: kc.accessToken };
@@ -88,7 +88,7 @@ export async function getAuth() {
   return null;
 }
 
-// 只回報狀態，不吐 token，給 CLI header / login 指令用
+// Report status only, never the token; used by the CLI header / login command
 export async function authStatus() {
   const a = await getAuth();
   if (!a) return { ok: false, label: 'Not logged in (log in with Claude Code first, or set ANTHROPIC_API_KEY)' };

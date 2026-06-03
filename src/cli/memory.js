@@ -1,17 +1,17 @@
-// 軌跡記憶（持續進化的「快迴圈」）：
-// 每次 agent 跑完一個任務，把「任務 / 讀過哪些檔 / 改過哪些檔 / 做法摘要 / 有沒有善終」
-// 寫成一行 JSONL。下次來相似任務，撈出最像的幾筆塞進 system prompt，
-// 讓小模型站在自己過去的經驗上做事，不用重新訓練權重就會「越用越熟這個 codebase」。
+// Trajectory memory (the continuously-evolving "fast loop"):
+// Each time the agent finishes a task, write "task / which files read / which files modified / approach summary / whether it finished cleanly"
+// as one JSONL line. On the next similar task, recall the most similar few and stuff them into the system prompt,
+// so the small model stands on its own past experience and gets "more familiar with this codebase the more it's used" without retraining weights.
 //
-// 不靠網路、不靠 embedding 服務：用 token 重疊打分（ascii 詞 + 中文單字/bigram），
-// 本機就能跑、零相依、可單元測試。語料就是 agent 自己在這個專案走過的軌跡。
+// No network, no embedding service: score by token overlap (ascii words + Chinese characters/bigrams),
+// runs locally, zero deps, unit-testable. The corpus is the agent's own trajectories across this project.
 import fs from 'node:fs';
 import path from 'node:path';
 
 const MEM_DIR = '.cosmos-tree';
 const MEM_FILE = 'trajectories.jsonl';
 
-// 把字串切成可比對的 token 集合：英數詞 + 中文單字 + 中文 bigram
+// Split a string into a comparable token set: alphanumeric words + Chinese characters + Chinese bigrams
 export function tokenize(s) {
   const str = String(s || '').toLowerCase();
   const toks = new Set();
@@ -45,7 +45,7 @@ export function createMemory({ root, model = 'unknown', topK = 3, maxChars = 120
       .filter(Boolean);
   }
 
-  // 給新任務，撈出最像的「善終且真的改過檔」的舊軌跡，組成一段提示文字
+  // For a new task, recall the most similar old trajectories that "finished cleanly and actually changed files", and assemble a prompt snippet
   function recall(task) {
     const all = loadAll();
     if (!all.length) return '';
@@ -61,8 +61,8 @@ export function createMemory({ root, model = 'unknown', topK = 3, maxChars = 120
       .sort((a, b) => b.s - a.s)
       .slice(0, topK);
     if (!ranked.length) return '';
-    // 對小模型，措辭要「給它權限照做」而不是「叫它別照抄」。
-    // 觀察到舊版寫「僅供參考、不要照抄」會讓弱模型刻意忽略已驗證的修法、另外發明錯的做法。
+    // For small models, the wording must "give it permission to follow" rather than "tell it not to copy".
+    // Observed that the old wording "for reference only, don't copy" made weak models deliberately ignore the verified fix and invent a wrong approach instead.
     let out = '（你過去在這個專案修過幾乎一樣的問題，下面是當時「驗證通過」的修法。請先用 read_file 確認現況；只要問題本質相同，就直接照這個修法用 edit_file/write_file 改在「同一個檔案」上，不要另外發明新做法、不要新增檔案。）\n';
     for (const { r } of ranked) {
       const line =
@@ -75,7 +75,7 @@ export function createMemory({ root, model = 'unknown', topK = 3, maxChars = 120
     return out.trim();
   }
 
-  // 寫入一筆軌跡（append-only，壞行不會污染其他行）
+  // Write one trajectory (append-only; a bad line won't corrupt the others)
   function record(traj = {}) {
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -92,7 +92,7 @@ export function createMemory({ root, model = 'unknown', topK = 3, maxChars = 120
       fs.appendFileSync(file, JSON.stringify(row) + '\n');
       return row;
     } catch {
-      return null; // 記憶寫入失敗絕不能拖垮主任務
+      return null; // a memory write failure must never drag down the main task
     }
   }
 

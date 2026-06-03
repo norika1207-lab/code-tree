@@ -1,15 +1,16 @@
-// 讀 Claude Code 自己寫的 session JSONL,把「你在終端機跑 claude」這段真實 token 用量
-// 撈出來給上面那條 token 列。不是讀 Code Tree 內建 agent(那是另一條),是讀你真的在用的那個。
+// Reads the session JSONL that Claude Code writes itself, pulling out the real token usage
+// from your "running claude in the terminal" session to feed the token bar above. This is not
+// Code Tree's built-in agent (that's a separate stream); it's the one you're actually using.
 //
-// Claude Code 把每個專案的對話存在 ~/.claude/projects/<cwd 轉碼>/<session>.jsonl,
-// 每行一個事件,assistant 那種帶 message.usage:
+// Claude Code stores each project's conversation in ~/.claude/projects/<encoded cwd>/<session>.jsonl,
+// one event per line. The assistant ones carry message.usage:
 //   input_tokens / output_tokens / cache_read_input_tokens / cache_creation_input_tokens
-// 同一筆 message.id 會在檔裡重複出現(串流快照),所以用 id 去重,不然會重複加。
+// The same message.id can appear multiple times in the file (streaming snapshots), so dedupe by id, otherwise it double-counts.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-// cwd → Claude Code 的資料夾名:非英數一律換成 '-'（/Users/x/Code Tree → -Users-x-Code-Tree）
+// cwd → Claude Code's folder name: every non-alphanumeric char becomes '-' (/Users/x/Code Tree → -Users-x-Code-Tree)
 export function encodeCwd(cwd) {
   return cwd.replace(/[^A-Za-z0-9]/g, '-');
 }
@@ -18,7 +19,7 @@ function projectsDir() {
   return path.join(os.homedir(), '.claude', 'projects');
 }
 
-// 找這個 cwd 對應資料夾裡「最近改的」session 檔（= 目前這場對話）
+// Find the most-recently-modified session file in this cwd's folder (= the current conversation)
 export function newestSession(cwd) {
   const dir = path.join(projectsDir(), encodeCwd(cwd));
   let files = [];
@@ -35,7 +36,7 @@ export function newestSession(cwd) {
   return best;
 }
 
-// 把一個 session 檔的 token 用量加總（用 message.id 去重）
+// Sum up a session file's token usage (deduped by message.id)
 export function sumSession(file) {
   const out = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, file };
   if (!file) return out;
@@ -48,7 +49,7 @@ export function sumSession(file) {
     const msg = d.message;
     const u = msg && msg.usage;
     if (!u) continue;
-    const id = msg.id || d.uuid || line.length; // 沒 id 的退而用行內容當鍵
+    const id = msg.id || d.uuid || line.length; // fall back to line content as key when there's no id
     if (seen.has(id)) continue;
     seen.add(id);
     out.input += u.input_tokens || 0;
@@ -59,7 +60,7 @@ export function sumSession(file) {
   return out;
 }
 
-// 給定 cwd,直接回目前 session 的累計用量
+// Given a cwd, return the current session's cumulative usage directly
 export function readUsage(cwd) {
   return sumSession(newestSession(cwd));
 }

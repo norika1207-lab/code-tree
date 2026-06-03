@@ -1,6 +1,6 @@
-// Cosmos Tree Core。
-// 職責：掃描專案 → 建活樹 → 監聽檔案變化 → 偵測異常 → WebSocket 廣播給 CLI / 視覺。
-// 設計原則（spec）：以 file watcher 為主要訊號，agent log 為輔。
+// Cosmos Tree Core.
+// Responsibilities: scan the project → build the live tree → watch file changes → detect anomalies → broadcast to CLI / visualization over WebSocket.
+// Design principle (spec): the file watcher is the primary signal, agent log is secondary.
 import { WebSocketServer } from 'ws';
 import chokidar from 'chokidar';
 import http from 'node:http';
@@ -18,7 +18,7 @@ import { readUsage } from './token-meter.js';
 import { computeSavings } from './token-savings.js';
 import { createSessionLogger } from './session-log.js';
 
-// 給本地小模型的工作紀律（routed 第一層用）。讓小模型真的呼叫工具、別只敘述計畫。
+// Work discipline for the local small model (used by routed's first tier). Makes the small model actually call tools instead of just describing a plan.
 const LOCAL_DISCIPLINE = `（重要工作紀律）
 - 任務還沒完成前，每一輪「只」輸出一個工具呼叫，不要用文字描述你「打算」呼叫什麼。想讀檔就直接發 read_file，想改檔就直接發 edit_file。
 - 不要把工具呼叫寫成 markdown 或 JSON 範例貼在回覆裡。要呼叫就真的呼叫。
@@ -26,19 +26,19 @@ const LOCAL_DISCIPLINE = `（重要工作紀律）
 - 改小檔（大約 40 行以內）就直接用 write_file 把整個檔案重寫一遍，這最可靠。
 - 只有在整個任務確實做完時，才用純文字做最後收尾；那一輪不要再發工具呼叫。`;
 
-// makeAgent 可注入：預設用 SDK agent（借 Claude Code 登入）；測試時換 scripted（不燒 token）。
+// makeAgent is injectable: defaults to the SDK agent (borrowing Claude Code's login); tests swap in scripted (burns no token).
 export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_PORT, quiet = false, makeAgent, terminalCwd, projectLabel, noProject = false } = {}) {
   root = path.resolve(root);
-  // 終端機開在哪個資料夾：預設跟監看根同一處；無專案模式時可以指到家目錄，
-  // 讓 shell 立刻能用，視覺化卻不必去掃整個 home。
+  // Which folder the terminal opens in: defaults to the same place as the watch root; in no-project mode it can point at the home directory,
+  // so the shell is immediately usable while the visualization doesn't have to scan all of home.
   const shellCwd = path.resolve(terminalCwd || root);
-  // graph / root 可被 reroot 換掉（右邊世界樹跟著終端機 cwd 走），所以用 let
+  // graph / root can be swapped out by reroot (the world tree on the right follows the terminal's cwd), hence let
   let graph = new Graph(root);
   const wss = new WebSocketServer({ port });
   const clients = new Set();
 
-  // ── 真 shell 的 PTY：用現成的 node-pty（VS Code / Hyper 同一顆），不自己重寫終端機。──
-  // 守護式載入：沒裝也讓 core 照常跑，終端 pane 只回報「shell 未就緒」。
+  // ── Real shell PTY: use the off-the-shelf node-pty (same one as VS Code / Hyper) instead of rewriting a terminal ourselves. ──
+  // Guarded load: even if it's not installed, core keeps running and the terminal pane just reports "shell not ready".
   let ptyMod = null, ptyTried = false;
   async function getPty() {
     if (ptyTried) return ptyMod;
@@ -48,11 +48,11 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     return ptyMod;
   }
 
-  // ── 靜態服務：/ 吐「終端機 + 視覺化」分屏頁；/viz 吐純視覺化大圖。──
+  // ── Static serving: / returns the "terminal + visualization" split-screen page; /viz returns the full visualization view. ──
   const WEB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../web');
   const HTML_PATH = path.join(WEB_DIR, 'cosmos.html');
   const TERM_PATH = path.join(WEB_DIR, 'terminal.html');
-  // 把實際 WS 埠 + 專案標籤注進頁面，前端才連得到本 core、底下那條列才顯示得出開的是什麼
+  // Inject the actual WS port + project label into the page, so the frontend can connect to this core and the bottom bar can show what's open
   const projLabel = noProject ? '無專案' : (projectLabel || path.basename(root));
   const injectPort = (html) => html.replace('<head>',
     `<head><script>window.__WS_PORT__=${port};window.__PROJECT_LABEL__=${JSON.stringify(projLabel)};window.__NO_PROJECT__=${noProject ? 'true' : 'false'}</script>`);
@@ -67,9 +67,9 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   };
   const webServer = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://localhost');
-    // 純視覺化大圖（終端右邊的 iframe 載這個；也可單開）
+    // Full visualization view (the iframe to the right of the terminal loads this; can also be opened standalone)
     if (u.pathname === '/viz') { serveHtml(res, HTML_PATH, 'cosmos.html'); return; }
-    // /file?path=rel → 回單一檔案內容（點格子切進去看正在跑的 code）
+    // /file?path=rel → return a single file's content (click a cell to drill in and see the code being run)
     if (u.pathname === '/file') {
       const rel = u.searchParams.get('path') || '';
       const abs = path.resolve(root, rel);
@@ -88,8 +88,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       }
       return;
     }
-    // /preview/<相對路徑> → 用正確 MIME 直接吐檔案（UI 檔在詳情面板裡渲染預覽用）。
-    // 用路徑式 URL（不是 query），HTML 裡的相對資源（./app.js、圖片、css）才解析得到。
+    // /preview/<relative path> → serve the file directly with the correct MIME (for rendering a UI file's preview in the detail panel).
+    // Uses a path-style URL (not a query) so relative assets in the HTML (./app.js, images, css) resolve correctly.
     if (u.pathname.startsWith('/preview/')) {
       const rel = decodeURIComponent(u.pathname.slice('/preview/'.length));
       const abs = path.resolve(root, rel);
@@ -118,10 +118,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       }
       return;
     }
-    // 其餘一律回「終端機 + 視覺化」分屏主頁
+    // Everything else returns the "terminal + visualization" split-screen main page
     serveHtml(res, TERM_PATH, 'terminal.html');
   });
-  // web port 被占用就往後挪，視覺化才不會默默開不起來
+  // If the web port is taken, shift to the next one so the visualization doesn't silently fail to open
   let actualWebPort = webPort;
   webServer.on('error', (e) => {
     if (e.code === 'EADDRINUSE' && actualWebPort < webPort + 10) {
@@ -136,10 +136,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
 
   const log = (...a) => !quiet && console.log('[core]', ...a);
 
-  // ── Session 逐字稿：每條 pty（一次 CLI 開啟）配一個記錄器，整段過程寫成 txt。──
+  // ── Session transcript: each pty (one CLI launch) gets a logger that writes the whole run to a txt file. ──
   const sessionLogs = new Set();
   function logEvent(tag, text) { for (const l of sessionLogs) l.event(tag, text); }
-  // 把「網頁派工」流（不經過終端 pane）的 agent 動作也記進逐字稿，才算「完整記錄」。
+  // Also record the agent actions from the "web dispatch" flow (which bypasses the terminal pane) into the transcript, so it's a "complete record".
   function logBroadcast(msg) {
     if (!sessionLogs.size || !msg || !msg.payload) return;
     const p = msg.payload;
@@ -166,10 +166,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     broadcast({ type: 'state', payload: graph.snapshot() });
   }
 
-  // ── Agent runner：讓瀏覽器（或 CLI）透過 WS 派 prompt，agent 在 core 這邊跑 ──
-  // 省 token 引擎：CODETREE_ENGINE=routed 時，每個任務先丟本地小模型（baseURL 指的那台），
-  // verify 過就收工，整段 0 Anthropic token；本地跑不過品質地板才升級到 Claude SDK。
-  // 沒設 env（或本地那台沒開）就退回純 SDK，現有使用者零影響。
+  // ── Agent runner: lets the browser (or CLI) dispatch a prompt over WS, with the agent running here in core ──
+  // Token-saving engine: when CODETREE_ENGINE=routed, each task first goes to the local small model (the one baseURL points at),
+  // and if it passes verify, we're done with 0 Anthropic tokens for the whole thing; only when the local run falls below the quality floor do we escalate to the Claude SDK.
+  // With no env set (or the local one not running), it falls back to pure SDK, so existing users see zero impact.
   const ENGINE = process.env.CODETREE_ENGINE || 'sdk';
   const LOCAL_URL = process.env.CODETREE_LOCAL_URL || 'http://localhost:8000/v1';
   const LOCAL_MODEL = process.env.CODETREE_LOCAL_MODEL || 'qwen-coder';
@@ -186,7 +186,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     return createSdkAgent({ root, onEvent, emit, getState, onGate, lastSaid });
   };
   const makeAgentFn = makeAgent || defaultAgent;
-  // reroot 時要拿新的 graph/root 重綁，所以包成工廠；idle 才換，不打斷正在跑的 agent
+  // On reroot we need to rebind to the new graph/root, so wrap it in a factory; only swap when idle, to avoid interrupting a running agent
   function makeRunner() { return createRunner({ root, graph, broadcast, makeAgent: makeAgentFn }); }
   let runner = makeRunner();
 
@@ -195,13 +195,13 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     graph.setImports(absPath, parseImports(absPath, root));
   }
 
-  // ── 掃描 watcher：可被 reroot 換根，右邊世界樹跟著終端機 cwd 走 ──
+  // ── Scan watcher: its root can be swapped by reroot, so the world tree on the right follows the terminal's cwd ──
   let ready = false;
   let watcher = null;
   function attachWatcher() {
     ready = false;
     watcher = chokidar.watch(root, {
-      ignored: (p) => isIgnored(p), // chokidar v4：ignored 吃 function，不再吃 glob
+      ignored: (p) => isIgnored(p), // chokidar v4: ignored takes a function, no longer a glob
       ignoreInitial: false,
       persistent: true,
     });
@@ -221,7 +221,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       reparse(p);
       const cell = graph.record(p, 'modify');
       emitActivity(cell, 'modify');
-      // 異常：反覆修改
+      // Anomaly: repeated modification
       if (cell.modification_count >= ANOMALY.REPEAT_MODIFY) {
         broadcast({
           type: 'anomaly',
@@ -249,8 +249,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   }
   attachWatcher();
 
-  // 換監看根：終端機 cd 到別的專案 → 右邊重新長那個專案。WS / web server 都不動，
-  // 同一條連線直接換掉底下的 graph，重掃完一次 pushState，畫面平順換成新專案。
+  // Switch the watch root: the terminal cd's into another project → the right side regrows that project. WS / web server stay put,
+  // the same connection just swaps the underlying graph, does one pushState after rescanning, and the view smoothly switches to the new project.
   function reroot(newDir) {
     const resolved = path.resolve(newDir);
     if (resolved === root) return;
@@ -258,12 +258,12 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     root = resolved;
     if (watcher) { try { watcher.close(); } catch {} }
     graph = new Graph(root);
-    if (!runner.busy) runner = makeRunner(); // idle 才換 runner，不打斷正在跑的 agent
+    if (!runner.busy) runner = makeRunner(); // only swap the runner when idle, to avoid interrupting a running agent
     attachWatcher();
     broadcast({ type: 'project', payload: { root, label: path.basename(root) } });
   }
 
-  // ── 跟著終端機 cwd：shell cd 進某個專案，右邊自動換根。非侵入式（不改使用者 shell）──
+  // ── Follow the terminal's cwd: when the shell cd's into a project, the right side auto-switches root. Non-invasive (doesn't modify the user's shell) ──
   let cwdTimer = null, followPid = null, lastCwd = shellCwd;
   function shellCwdOf(pid) {
     return new Promise((res) => {
@@ -291,15 +291,15 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   }
   function stopCwdFollow() { if (cwdTimer) clearInterval(cwdTimer); cwdTimer = null; followPid = null; }
 
-  // ── Token 列：讀「你在這個 cwd 跑 claude」那場 Claude Code session 的真實用量，
-  // 每 2 秒推一次給輸入框上方那條。baseline 是「清掉」按鈕的歸零點（扣掉它才是本次累計）；
-  // 換 session 檔（開新對話）就自動把 baseline 歸零，數字重新從 0 起算。──
+  // ── Token bar: reads the real usage of the Claude Code session for "you running claude in this cwd",
+  // pushing it every 2 seconds to the bar above the input box. The baseline is the zero point of the "clear" button (subtract it to get this run's total);
+  // switching session files (starting a new conversation) auto-resets the baseline so the numbers count up from 0 again. ──
   let tokTimer = null;
   let tokBaseline = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let tokSessionFile = null;
   function tokensSnapshot() {
     const u = readUsage(lastCwd); // { input, output, cacheRead, cacheWrite, file }
-    if (u.file !== tokSessionFile) { // 換了 session 檔 → 新對話，歸零基準
+    if (u.file !== tokSessionFile) { // session file changed → new conversation, reset the baseline
       tokSessionFile = u.file;
       tokBaseline = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     }
@@ -308,8 +308,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     const cacheRead = d('cacheRead'), cacheWrite = d('cacheWrite');
     return {
       input, output, cacheRead, cacheWrite,
-      saved: cacheRead,                       // cache 命中 = 沒重送的 token = 省下的
-      burned: input + output + cacheWrite,    // 真的燒掉的
+      saved: cacheRead,                       // cache hit = tokens not resent = saved
+      burned: input + output + cacheWrite,    // actually burned
     };
   }
   function broadcastTokens() { broadcast({ type: 'tokens', payload: tokensSnapshot() }); }
@@ -318,7 +318,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     broadcastTokens();
     tokTimer = setInterval(broadcastTokens, 2000);
   }
-  function clearTokens() { // 「清掉」：把目前的原始累計設成新基準，顯示歸零
+  function clearTokens() { // "clear": set the current raw total as the new baseline, so the display reads zero
     const u = readUsage(lastCwd);
     tokSessionFile = u.file;
     tokBaseline = { input: u.input || 0, output: u.output || 0, cacheRead: u.cacheRead || 0, cacheWrite: u.cacheWrite || 0 };
@@ -327,8 +327,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   function stopTokens() { if (tokTimer) clearInterval(tokTimer); tokTimer = null; }
   startTokens();
 
-  // ── 「不清的代價」：掃全機 session 算 cache 浪費，廣播給 token 列旁邊那塊。
-  // 比 token 列慢（讀很多檔），10 秒一次就好；上一輪沒算完不疊下一輪。──
+  // ── "Cost of not clearing": scan all sessions on the machine to compute cache waste, broadcast to the block next to the token bar.
+  // Slower than the token bar (reads many files), so once every 10 seconds is fine; don't stack a new round on top of an unfinished one. ──
   let saveTimer = null, savingBusy = false;
   async function broadcastSavings() {
     if (savingBusy) return;
@@ -336,8 +336,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     try {
       const s = await computeSavings();
       if (s && s.ok) broadcast({ type: 'savings', payload: {
-        clearNowUsd: s.clear_now_savings_usd || 0, // 現在清，下一小時省這麼多 = 不清的代價
-        wastedUsd: s.wasted_usd || 0,              // 已經寫進 cache 卻沒被讀回 = 已浪費
+        clearNowUsd: s.clear_now_savings_usd || 0, // clear now, save this much next hour = the cost of not clearing
+        wastedUsd: s.wasted_usd || 0,              // written into cache but never read back = already wasted
         wastedTokens: s.wasted_tokens || 0,
         nActive: s.n_active || 0,
       } });
@@ -358,32 +358,32 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     });
   }
 
-  // ── WebSocket：CLI、視覺化、終端機都連這裡 ──
+  // ── WebSocket: CLI, visualization, and terminal all connect here ──
   wss.on('connection', (ws) => {
     clients.add(ws);
     ws.send(JSON.stringify({ type: 'state', payload: graph.snapshot() }));
     ws.send(JSON.stringify({ type: 'tokens', payload: tokensSnapshot() }));
-    let pty = null; // 這條連線專屬的 shell（終端 pane 要求時才開）
-    let slog = null; // 這條連線的 session 逐字稿（pty 起來才開）
+    let pty = null; // this connection's own shell (opened only when the terminal pane requests it)
+    let slog = null; // this connection's session transcript (opened only once the pty is up)
 
     async function startPty(cols, rows) {
       if (pty) return;
       const mod = await getPty();
-      if (!mod) { // 沒裝 node-pty：照實回報，不假裝有終端機
+      if (!mod) { // node-pty not installed: report honestly, don't pretend there's a terminal
         ws.send(JSON.stringify({ type: 'pty_missing' }));
         return;
       }
       const shell = process.env.SHELL || '/bin/zsh';
-      // 從 Finder 雙擊開的 GUI app 只拿得到 launchd 的精簡 PATH（沒有 /opt/homebrew/bin
-      // 之類），打 claude、brew 裝的工具會「找不到指令」像沒反應。用登入 shell（-l）開，
-      // 讓它 source 使用者的 .zprofile / .zshrc 把完整 PATH 補回來。VS Code、Hyper 同招。
+      // A GUI app launched by double-clicking in Finder only gets launchd's stripped-down PATH (no /opt/homebrew/bin
+      // and the like), so claude and brew-installed tools give "command not found" and seem unresponsive. Open with a login shell (-l)
+      // so it sources the user's .zprofile / .zshrc and restores the full PATH. VS Code and Hyper do the same.
       const loginArgs = /\/(zsh|bash|sh|fish)$/.test(shell) ? ['-l'] : [];
       pty = mod.spawn(shell, loginArgs, {
         name: 'xterm-color',
         cols: cols || 80, rows: rows || 24,
         cwd: shellCwd, env: process.env,
       });
-      // CLI 一開就起逐字稿，把這條 shell 的所有可見輸出寫進 txt（給日後記憶訓練用）。
+      // Start the transcript as soon as the CLI opens, writing all of this shell's visible output to a txt file (for future memory training).
       slog = createSessionLogger({ root, label: projLabel });
       if (slog.ok) {
         sessionLogs.add(slog);
@@ -400,7 +400,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         if (slog) { sessionLogs.delete(slog); slog.close('shell exited'); slog = null; }
         pty = null;
       });
-      startCwdFollow(pty.pid); // 終端機開了就盯它的 cwd，cd 進專案右邊自動換根
+      startCwdFollow(pty.pid); // once the terminal is open, watch its cwd; cd'ing into a project auto-switches the root on the right
     }
 
     ws.on('message', (raw) => {
@@ -410,7 +410,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       } catch {
         return;
       }
-      // 終端 pane 的訊息走專線（真 shell 的 stdin / resize），其餘交給共用處理
+      // Terminal pane messages take a dedicated path (the real shell's stdin / resize), everything else goes to the shared handler
       if (msg.type === 'pty_start') { startPty(msg.cols, msg.rows); return; }
       if (msg.type === 'pty_input') { if (pty) pty.write(msg.data); return; }
       if (msg.type === 'pty_resize') { if (pty) try { pty.resize(msg.cols, msg.rows); } catch {} return; }
@@ -423,7 +423,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     });
   });
 
-  // CLI 端把 agent 動作（read / prompt）回報進來，當作輔助訊號
+  // The CLI side reports agent actions (read / prompt) back in, as a secondary signal
   function handleInbound(msg) {
     if (msg.type === 'agent_read' && msg.path) {
       const abs = path.resolve(root, msg.path);
@@ -431,22 +431,22 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       emitActivity(cell, 'read');
       pushState();
     } else if (msg.type === 'agent_active' && msg.path) {
-      // CLI 回報 agent 正在哪一格 → 廣播，讓 3D 鏡頭飛過去
+      // The CLI reports which cell the agent is on → broadcast it so the 3D camera flies there
       const abs = path.resolve(root, msg.path);
       const cell = graph.record(abs, 'active');
       broadcast({ type: 'active', payload: { path: cell.path, id: abs } });
       pushState();
     } else if (msg.type === 'run' && msg.text) {
-      // 瀏覽器當主介面：在視窗下 prompt → core 跑 agent，事件串回網頁
+      // Browser as the main UI: prompt from the window → core runs the agent, events stream back to the page
       runner.run(msg.text, msg.id);
     } else if (msg.type === 'gate_reply') {
-      // 網頁回覆 MASL 關卡：放行 / 擋下
+      // The page replies to the MASL gate: allow / block
       runner.replyGate(msg.id, msg.approve);
     } else if (msg.type === 'tokens_clear') {
-      // 輸入框上方那條的「清掉」按鈕：把目前累計設成新基準，數字歸零
+      // The "clear" button on the bar above the input box: set the current total as the new baseline, zeroing the numbers
       clearTokens();
     } else if (msg.type === 'prompt') {
-      graph.activePromptId = msg.id || null; // 之後 watcher 抓到的修改都歸這個 prompt
+      graph.activePromptId = msg.id || null; // edits the watcher catches afterward are attributed to this prompt
       broadcast({ type: 'prompt', payload: { id: msg.id, text: msg.text, ts: Date.now() } });
     } else if (msg.type === 'error_seen' && msg.message) {
       const n = (graph.errorSeen.get(msg.message) || 0) + 1;
@@ -460,7 +460,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     }
   }
 
-  // ── 卡住偵測：週期性掃描 ──
+  // ── Stall detection: periodic scan ──
   const stallTimer = setInterval(() => {
     const stalled = graph.checkStall();
     for (const cell of stalled) {
@@ -492,10 +492,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   };
 }
 
-// 允許直接 `node src/core/server.js [targetDir]` 起動
-// 用 pathToFileURL 比對，路徑含空白（如 "Cosmos Tree"）才不會誤判。
+// Allow launching directly via `node src/core/server.js [targetDir]`
+// Compare using pathToFileURL so paths with spaces (like "Cosmos Tree") aren't misjudged.
 import { pathToFileURL } from 'node:url';
-// process.argv[1] 在打包後的 Electron 裡可能是 undefined，先擋一下才不會在 import 時就炸。
+// process.argv[1] may be undefined inside packaged Electron, so guard it to avoid blowing up at import time.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const target = process.argv[2] || process.cwd();
   startCore({ root: target });

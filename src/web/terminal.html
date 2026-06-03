@@ -10,17 +10,17 @@
   * { box-sizing:border-box; }
   html,body { margin:0; height:100%; background:var(--bg); overflow:hidden;
     font-family:-apple-system,"PingFang TC",system-ui,sans-serif; color:#eaf1fb; }
-  /* tmux 式切兩塊：左真終端機，右視覺化 */
+  /* tmux-style split into two: real terminal on the left, visualization on the right */
   #split { display:flex; width:100vw; height:100vh; }
   #left { position:relative; flex:1 1 58%; min-width:280px; display:flex; flex-direction:column;
     background:#05080e; }
-  /* 左邊留 78px 給 macOS 紅綠燈，內容不再被壓在燈號上 */
+  /* Leave 78px on the left for the macOS traffic lights so content isn't crammed under them */
   #lbar { flex:0 0 auto; height:38px; display:flex; align-items:center; gap:8px; padding:0 12px 0 78px;
     font-size:12px; letter-spacing:.5px; color:var(--ink); border-bottom:1px solid var(--line);
     -webkit-app-region:drag; user-select:none; white-space:nowrap; overflow:hidden; }
   #lbar .sub { overflow:hidden; text-overflow:ellipsis; min-width:0; }
   #lbar .dot { width:8px; height:8px; border-radius:50%; background:var(--neon); box-shadow:0 0 8px var(--neon); }
-  /* REC：CLI 開著就在錄逐字稿，亮起紅點＋REC，hover 顯示存檔路徑 */
+  /* REC: while the CLI is open it's recording a transcript; show a red dot + REC, hover reveals the save path */
   #recBadge { margin-left:auto; flex:0 0 auto; display:none; align-items:center; gap:5px;
     font-size:10px; font-weight:700; letter-spacing:1px; color:#ff7a8a;
     padding:2px 7px; border:1px solid rgba(255,122,138,.4); border-radius:10px; cursor:default; }
@@ -28,12 +28,12 @@
   #recBadge::before { content:''; width:7px; height:7px; border-radius:50%; background:#ff5a6e;
     box-shadow:0 0 7px #ff5a6e; animation:recblink 1.4s ease-in-out infinite; }
   @keyframes recblink { 0%,100%{opacity:1} 50%{opacity:.25} }
-  /* 輸入指令上方的 token 列：本次 input / cache 命中 / output / 省下，外加「清掉」歸零 */
-  /* 紅綠燈只在最上面那條,token 列在它下面,左留白回到 12px,不用再讓位 */
+  /* Token bar above the command input: this run's input / cache hits / output / saved, plus "Clear" to reset */
+  /* Traffic lights only on the top bar; the token bar sits below it, so left padding goes back to 12px with nothing to make way for */
   #tokbar { flex:0 0 auto; height:30px; display:flex; align-items:center; gap:14px;
     padding:0 12px; font-size:11.5px; letter-spacing:.3px; color:var(--ink);
     border-bottom:1px solid var(--line); background:#060b14; white-space:nowrap; }
-  /* 數字群放可橫向捲動的容器,窄到爆也不擠掉「清掉」鈕;捲軸隱形 */
+  /* Put the numbers in a horizontally scrollable container so even at extreme widths the "Clear" button isn't squeezed out; scrollbar hidden */
   #tokbar .stats { display:flex; align-items:center; gap:14px; overflow-x:auto; min-width:0; flex:1;
     scrollbar-width:none; } #tokbar .stats::-webkit-scrollbar { display:none; }
   #tokbar .tk { display:flex; align-items:baseline; gap:5px; flex:0 0 auto; }
@@ -41,7 +41,7 @@
   #tokbar .tk.save b { color:var(--neon); }
   #tokbar .tk.burn b { color:#ffcf4d; }
   #tokbar .spacer { flex:1; }
-  /* 不清的代價：平常灰,>0 變琥珀,燒越多越紅 */
+  /* Cost of not clearing: gray normally, amber when >0, redder the more it burns */
   #tokbar .waste { flex:0 0 auto; padding:2px 9px; border-radius:7px; font-weight:600;
     font-variant-numeric:tabular-nums; color:#6b7689; border:1px solid var(--line);
     cursor:default; transition:color .2s, border-color .2s, background .2s; }
@@ -52,7 +52,7 @@
     transition:border-color .15s, color .15s; }
   #tokbar button:hover { border-color:var(--neon); color:#fff; }
   #term { flex:1; min-height:0; padding:6px 8px; }
-  /* 命令列底下這條：看得見的切換專案列，不用躲進系統選單 */
+  /* The bar below the command line: a visible project switcher, no need to bury it in a system menu */
   #abar { flex:0 0 auto; height:36px; display:flex; align-items:center; gap:10px; padding:0 12px;
     border-top:1px solid var(--line); background:#070b12; font-size:12px; color:var(--ink); z-index:6; }
   #abar .proj { display:flex; align-items:center; gap:7px; color:#cfe0ff; min-width:0; max-width:46%; }
@@ -66,12 +66,12 @@
     transition:border-color .15s, color .15s; }
   #abar button:hover { border-color:var(--neon); color:#fff; }
   #abar button.ghost { background:transparent; }
-  /* 中間可拖的分隔線 */
+  /* Draggable divider in the middle */
   #grip { flex:0 0 6px; cursor:col-resize; background:linear-gradient(180deg,rgba(120,160,220,.05),rgba(120,160,220,.18),rgba(120,160,220,.05)); }
   #grip:hover { background:rgba(77,255,176,.35); }
   #right { flex:1 1 42%; min-width:260px; position:relative; border-left:1px solid var(--line); }
   #right iframe { width:100%; height:100%; border:0; background:var(--bg); display:block; }
-  /* 沒裝 node-pty 時的提示蓋層（底下留 36px 給 action bar，按鈕照樣按得到）*/
+  /* Hint overlay shown when node-pty isn't installed (leaves 36px at the bottom for the action bar so its buttons stay clickable) */
   #need { position:absolute; inset:68px 0 36px 0; display:none; flex-direction:column; gap:14px;
     align-items:center; justify-content:center; text-align:center; padding:28px; z-index:5; background:#05080e; }
   #need.show { display:flex; }
@@ -79,7 +79,7 @@
   #need p { margin:0; font-size:13px; color:var(--ink); line-height:1.7; max-width:440px; }
   #need code { background:rgba(120,160,220,.14); padding:3px 8px; border-radius:6px;
     font:13px/1.5 "SF Mono",ui-monospace,Menlo,monospace; color:var(--neon); }
-  /* MASL 警告 toast：AI(含終端機裡的 claude)自顧自寫出問題時，從這裡跳出來 */
+  /* MASL warning toast: pops up here when the AI (including claude in the terminal) writes something problematic on its own */
   #alerts { position:absolute; top:72px; right:12px; left:88px; z-index:7;
     display:flex; flex-direction:column; gap:8px; pointer-events:none; }
   #alerts .al { pointer-events:auto; background:rgba(30,10,14,.96); border:1px solid #ff6b81;
@@ -92,7 +92,7 @@
   #alerts .al .x { pointer-events:auto; cursor:pointer; color:#ff9aa9; flex:0 0 auto;
     padding:0 2px; opacity:.7; } #alerts .al .x:hover { opacity:1; }
   @keyframes alin { from{ transform:translateY(-6px); opacity:0; } to{ transform:none; opacity:1; } }
-  /* MASL 動手前關卡：Code Tree 自己的 agent 要改檔/跑指令前，擋下來等你點頭 */
+  /* MASL pre-action gate: before Code Tree's own agent edits a file or runs a command, block and wait for your nod */
   #masl { position:absolute; inset:0; z-index:9; display:none;
     align-items:center; justify-content:center; background:rgba(3,6,12,.78); backdrop-filter:blur(2px); }
   #masl.show { display:flex; }
@@ -160,7 +160,7 @@
   <script>
   const WS_PORT = window.__WS_PORT__ || 7778;
 
-  // ── 真終端機（xterm.js）：畫面歸它，shell 在 core 那邊由 node-pty 跑 ──
+  // ── Real terminal (xterm.js): it owns the display, while the shell runs on the core side via node-pty ──
   const term = new window.Terminal({
     fontFamily: '"SF Mono",ui-monospace,Menlo,Monaco,monospace',
     fontSize: 13, lineHeight: 1.25, cursorBlink: true,
@@ -190,19 +190,19 @@
       else if (m.type === 'pty_missing') document.getElementById('need').classList.add('show');
       else if (m.type === 'pty_exit') { term.write('\r\n\x1b[90m[shell exited]\x1b[0m\r\n'); setRec(null); }
       else if (m.type === 'session_log' && m.payload) {
-        // CLI 開了就在錄整段逐字稿，亮 REC 並把存檔路徑放進 tooltip
+        // Once the CLI is open it records the full transcript; light up REC and put the save path in the tooltip
         setRec(m.payload.file);
       }
       else if (m.type === 'gate' && m.payload) {
-        // MASL 動手前關卡：Code Tree 自己的 agent 要改檔/跑指令，先擋下來等你點頭
+        // MASL pre-action gate: before Code Tree's own agent edits a file or runs a command, block first and wait for your nod
         showGate(m.payload);
       }
       else if (m.type === 'anomaly' && m.payload) {
-        // 異常警告：反覆改同檔 / 卡住 / 錯誤重複。對終端機裡的 claude 也有效(file watcher 看得到任何 process)
+        // Anomaly warning: same file edited repeatedly / stalled / recurring error. Works for claude in the terminal too (the file watcher sees any process)
         showAlert(m.payload);
       }
       else if (m.type === 'tokens' && m.payload) {
-        // 輸入指令上方那條：本次這場 claude 對話真實燒掉的 token
+        // The bar above the command input: the tokens this claude conversation actually burned
         const f = (n) => (n || 0).toLocaleString('en-US');
         const p = m.payload;
         const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = f(v); };
@@ -210,7 +210,7 @@
         set('tkSave', p.saved); set('tkBurn', p.burned);
       }
       else if (m.type === 'savings' && m.payload) {
-        // 不清的代價：現在清掉 cache，接下來一小時大約省這麼多 = 不清就白燒這麼多
+        // Cost of not clearing: clear the cache now and you save roughly this much over the next hour = not clearing burns this much for nothing
         const el = document.getElementById('tkWaste');
         if (el) {
           const usd = m.payload.clearNowUsd || 0;
@@ -223,29 +223,29 @@
         }
       }
       else if (m.type === 'project' && m.payload) {
-        // 終端機 cd 進新專案 → 底下那條列的專案名跟著換，點亮綠點
+        // Terminal cd's into a new project → the project name in the bottom bar switches to match, and the green dot lights up
         const nm = document.getElementById('abarName');
         const pj = document.getElementById('abarProj');
         if (nm) nm.textContent = m.payload.label || 'Project';
         if (pj) pj.classList.remove('none');
       }
-      // state / active 等視覺化訊息由右邊 iframe 自己那條連線處理，這條只管終端
+      // Visualization messages like state / active are handled by the right iframe's own connection; this one only handles the terminal
     };
     ws.onclose = () => { started = false; setTimeout(connect, 1500); };
   }
   connect();
 
-  // 鍵盤 → shell
+  // Keyboard → shell
   term.onData((d) => send({ type:'pty_input', data:d }));
 
-  // 視窗 / 分隔線改變 → 重新 fit + 告訴 shell 新尺寸
+  // Window / divider changes → re-fit and tell the shell the new size
   function relayout(){
     fit.fit();
     if (started) send({ type:'pty_resize', cols: term.cols, rows: term.rows });
   }
   addEventListener('resize', relayout);
 
-  // 中間 grip 拖動：調左右比例
+  // Drag the middle grip: adjust the left/right ratio
   (function dragGrip(){
     const grip = document.getElementById('grip'), left = document.getElementById('left'),
           right = document.getElementById('right'), split = document.getElementById('split');
@@ -261,21 +261,21 @@
     });
   })();
 
-  // 點終端區域就把焦點搶回終端
+  // Clicking the terminal area grabs focus back to the terminal
   document.getElementById('term').addEventListener('mousedown', () => term.focus());
   term.focus();
 
-  // token 列「清掉」：叫 core 把目前累計設成新基準，畫面歸零，焦點還給終端
+  // Token bar "Clear": tell core to set the current totals as the new baseline, zero the display, and return focus to the terminal
   (function tokenClear(){
     const btn = document.getElementById('tkClear');
     if (!btn) return;
     btn.onclick = () => { send({ type:'tokens_clear' }); term.focus(); };
   })();
 
-  // ── MASL 動手前關卡：擋下來，等你按放行 / 擋下 ──
+  // ── MASL pre-action gate: block and wait for you to hit Allow / Block ──
   let gateId = null;
   function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-  // REC 徽章：傳檔名就亮起並把存檔路徑放進 tooltip；傳 null 就熄掉（shell 結束）
+  // REC badge: pass a filename to light it up and put the save path in the tooltip; pass null to turn it off (shell ended)
   function setRec(file){
     const b = document.getElementById('recBadge');
     if (!b) return;
@@ -306,7 +306,7 @@
   document.getElementById('maslDeny').onclick = () => closeGate(false);
   document.getElementById('maslAllow').onclick = () => closeGate(true);
 
-  // ── 異常警告 toast：自顧自寫出問題時跳出來，可手動關，error/repeat 不自動消 ──
+  // ── Anomaly warning toast: pops up when it writes something problematic on its own; can be closed by hand, error/repeat don't auto-dismiss ──
   function showAlert(p){
     const wrap = document.getElementById('alerts');
     const el = document.createElement('div');
@@ -317,12 +317,12 @@
     el.innerHTML = `<span class="ic">⚠</span><div class="bd"><b>${esc(label)}</b><br>${esc(p.message||'')}</div><span class="x">✕</span>`;
     el.querySelector('.x').onclick = () => el.remove();
     wrap.appendChild(el);
-    // stall 這種比較軟的 12 秒後自動消；反覆改 / 錯誤重複留著要你正視
+    // Softer ones like stall auto-dismiss after 12s; repeated edits / recurring errors stay so you face them
     if (p.rule === 'stall') setTimeout(() => el.remove(), 12000);
     while (wrap.children.length > 5) wrap.firstChild.remove();
   }
 
-  // ── 底下那條切換專案列 ──
+  // ── The project switcher bar at the bottom ──
   (function actionBar(){
     const proj = document.getElementById('abarProj');
     const nameEl = document.getElementById('abarName');
@@ -330,12 +330,12 @@
     const btnNone = document.getElementById('btnNone');
     nameEl.textContent = window.__PROJECT_LABEL__ || 'Project';
     if (window.__NO_PROJECT__ === true) proj.classList.add('none');
-    const bridge = window.codetree;   // 只有桌面 app（Electron preload）才有
+    const bridge = window.codetree;   // Only present in the desktop app (Electron preload)
     if (bridge) {
       btnOpen.onclick = () => bridge.pickProject();
       btnNone.onclick = () => bridge.openNoProject();
     } else {
-      // 純瀏覽器開頁：選資料夾需要原生對話框，先把按鈕收起，只留專案名
+      // Plain browser page: picking a folder needs a native dialog, so hide the buttons and keep only the project name
       btnOpen.style.display = 'none';
       btnNone.style.display = 'none';
     }
