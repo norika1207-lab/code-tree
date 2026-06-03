@@ -7,11 +7,19 @@ A coding-agent CLI whose view follows whatever file the agent touches. You type 
 It runs on Claude, borrowing your existing Claude Code login, so there is no separate API key to set up. No cloud login at all? It also drives a local model (Ollama, vLLM, llama.cpp) with zero login.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="Code Tree reviewing its own codebase in real time" width="900">
+  <img src="assets/world-tree.gif" alt="The world-tree: each file is a block, lines are dependencies, the camera follows the agent" width="900">
 </p>
 
 <p align="center">
-  <sub>A real, unedited recording: Claude reviews Code Tree's own source. The camera follows each file it reads, the flow trail grows, and the token bar climbs as it works. (<a href="assets/demo.mp4">MP4</a>)</sub>
+  <sub>The world-tree (<code>--web</code>): every block is a file, every line is a dependency. As the agent works, the file it touches lights up green and the camera flies to it. Real, unedited. (<a href="assets/world-tree.mp4">MP4</a>)</sub>
+</p>
+
+<p align="center">
+  <img src="assets/demo.gif" alt="The terminal view: Claude reviewing the codebase, flow trail and token bar" width="900">
+</p>
+
+<p align="center">
+  <sub>The all-in-terminal view: same engine, no browser. Claude reviews this codebase live, the flow trail grows, and the token bar climbs as it burns. (<a href="assets/demo.mp4">MP4</a>)</sub>
 </p>
 
 ## Install
