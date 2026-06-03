@@ -264,6 +264,10 @@ function App() {
         } else if (e.type === 'usage') {
           meterRef.current.add(e.usage);
           setTok(meterRef.current.snapshot());
+          // also push real usage to core so the browser world-tree's token bar goes live too
+          if (wsRef.current?.readyState === 1) {
+            wsRef.current.send(JSON.stringify({ type: 'cli_usage', usage: e.usage }));
+          }
         } else if (e.type === 'tier') {
           setTier(e.name);
           pushFeed({ kind: 'tool', name: e.index === 0 ? `↳ using ${e.name} (trying the cheap one first)` : `↗ escalating to ${e.name}`, path: '' });

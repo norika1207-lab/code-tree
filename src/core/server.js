@@ -298,7 +298,14 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   let tokTimer = null;
   let tokBaseline = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let tokSessionFile = null;
+  // When Code Tree's own agent runs (direct API, not the claude CLI) it pushes real usage over WS.
+  // That doesn't land in the Claude Code session JSONL, so prefer the pushed totals when present.
+  let cliTok = null; // { input, output, cacheRead, cacheWrite } accumulated from cli_usage
   function tokensSnapshot() {
+    if (cliTok) {
+      const { input, output, cacheRead, cacheWrite } = cliTok;
+      return { input, output, cacheRead, cacheWrite, saved: cacheRead, burned: input + output + cacheWrite };
+    }
     const u = readUsage(lastCwd); // { input, output, cacheRead, cacheWrite, file }
     if (u.file !== tokSessionFile) { // session file changed → new conversation, reset the baseline
       tokSessionFile = u.file;
@@ -443,8 +450,18 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     } else if (msg.type === 'gate_reply') {
       // The page replies to the MASL gate: allow / block
       runner.replyGate(msg.id, msg.approve);
+    } else if (msg.type === 'cli_usage' && msg.usage) {
+      // Code Tree's own agent reports a turn's real token usage → accumulate and push to the token bar
+      const u = msg.usage;
+      if (!cliTok) cliTok = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+      cliTok.input += u.input_tokens || 0;
+      cliTok.output += u.output_tokens || 0;
+      cliTok.cacheRead += u.cache_read_input_tokens || 0;
+      cliTok.cacheWrite += u.cache_creation_input_tokens || 0;
+      broadcastTokens();
     } else if (msg.type === 'tokens_clear') {
       // The "clear" button on the bar above the input box: set the current total as the new baseline, zeroing the numbers
+      cliTok = null;
       clearTokens();
     } else if (msg.type === 'prompt') {
       graph.activePromptId = msg.id || null; // edits the watcher catches afterward are attributed to this prompt
