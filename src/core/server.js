@@ -510,9 +510,15 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       // the CLI agent recalled past trajectories → surface it in the browser too
       broadcast({ type: 'recall', payload: { count: msg.count || 1, text: msg.text || '' } });
     } else if (msg.type === 'revert' && msg.path) {
-      // Restore a file to how it was at session start (local mode only). The watcher then catches the
-      // write as a change, so the tree + ledger update on their own.
-      if (remote) { broadcast({ type: 'agent_error', payload: { message: 'Revert is local-only for now (remote files edit over ssh).' } }); return; }
+      // Restore a file to how it was at session start. The watcher (local) or the next scan (remote)
+      // catches the write, so the tree + ledger update on their own.
+      if (remote) {
+        remoteSource?.revert(msg.path).then((r) => {
+          if (r.ok) { logEvent('revert', msg.path); logRecord({ type: 'revert', path: msg.path }); }
+          else broadcast({ type: 'agent_error', payload: { message: `Revert failed (${msg.path}): ${r.err}` } });
+        });
+        return;
+      }
       const abs = path.resolve(root, msg.path);
       if (abs !== root && !abs.startsWith(root + path.sep)) return;
       if (baselines.has(abs)) {

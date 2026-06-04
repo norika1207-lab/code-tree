@@ -108,6 +108,7 @@ function parseScan(raw) {
 export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, onStatus }) {
   let timer = null, lastMtime = new Map(), firstOk = false, stopped = false;
   let content = new Map(); // rel → file content from the latest scan, so the web server can serve card previews
+  let baseline = new Map(); // rel → content at the FIRST scan, for remote "revert to session start"
 
   function snapshotFrom(files) {
     const known = new Set(files.map((f) => f.rel));
@@ -144,8 +145,9 @@ export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, 
     if (!res.ok) { onStatus?.({ ok: false, error: res.err || 'ssh failed', host, root }); return; }
     const files = parseScan(res.out);
     if (!files.length && !firstOk) { onStatus?.({ ok: false, error: 'no code files found (check the path)', host, root }); return; }
-    firstOk = true;
     content = new Map(files.map((f) => [f.rel, f.content]));
+    if (!firstOk) baseline = new Map(content); // first scan = the "session start" snapshot for revert
+    firstOk = true;
     onStatus?.({ ok: true, host, root, files: files.length });
     onSnapshot?.(snapshotFrom(files));
   }
@@ -155,5 +157,22 @@ export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, 
     stop() { stopped = true; if (timer) clearInterval(timer); timer = null; },
     scanNow: scan,
     getContent: (rel) => content.get(rel),
+    hasBaseline: (rel) => baseline.has(rel),
+    // Restore a remote file to its session-start content by piping it back over ssh (cat > file).
+    revert(rel) {
+      return new Promise((resolve) => {
+        if (!baseline.has(rel)) return resolve({ ok: false, err: 'no session-start snapshot' });
+        const abs = `${root.replace(/\/$/, '')}/${rel}`;
+        const p = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, `cat > ${JSON.stringify(abs)}`], { stdio: ['pipe', 'ignore', 'pipe'] });
+        let err = '';
+        p.stderr.on('data', (d) => (err += d));
+        p.on('error', (e) => resolve({ ok: false, err: e.message }));
+        p.on('close', (code) => {
+          if (code === 0) { content.set(rel, baseline.get(rel)); lastMtime.delete(rel); scan(); resolve({ ok: true }); }
+          else resolve({ ok: false, err: err || ('exit ' + code) });
+        });
+        try { p.stdin.write(baseline.get(rel)); p.stdin.end(); } catch (e) { resolve({ ok: false, err: e.message }); }
+      });
+    },
   };
 }
