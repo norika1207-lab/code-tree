@@ -7,6 +7,14 @@ A coding-agent CLI whose view follows whatever file the agent touches. You type 
 It runs on Claude, borrowing your existing Claude Code login, so there is no separate API key to set up. No cloud login at all? It also drives a local model (Ollama, vLLM, llama.cpp) with zero login.
 
 <p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-4dffb0">
+  <img src="https://img.shields.io/badge/node-%E2%89%A518-7fb2ff">
+  <img src="https://img.shields.io/badge/platform-macOS-cfe0ff">
+  <img src="https://img.shields.io/badge/runs%20on-Claude%20or%20local-86e0ff">
+  <img src="https://img.shields.io/badge/projects-local%20or%20over%20ssh-ffcf4d">
+</p>
+
+<p align="center">
   <img src="assets/world-tree-v3.gif" alt="Code Tree: a real Claude agent fixing a bug, watched live as a world-tree with a change ledger" width="900">
 </p>
 
