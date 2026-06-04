@@ -111,6 +111,25 @@
   #radar .ritem .rname { font:600 12px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#fff;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #radar .ritem .rwhy { margin-top:3px; font-size:11px; color:#ffb0bd; }
+
+  /* Change ledger (top-right): the temporal "what did the agent change" list */
+  #ledger { right:22px; top:64px; width:264px; max-height:44vh; padding:0; display:none; flex-direction:column; overflow:hidden; }
+  #ledger.on { display:flex; }
+  #ledger .lhd { flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:11px 15px;
+    font-size:12px; color:#cfe0ff; border-bottom:1px solid var(--line); letter-spacing:.2px; }
+  #ledger .lhd .lhdot { width:8px; height:8px; border-radius:50%; background:var(--neon); box-shadow:0 0 8px var(--neon); }
+  #ledger .lhd b { color:#fff; font-weight:700; }
+  #ledger .llist { flex:1; overflow-y:auto; padding:6px; display:flex; flex-direction:column; gap:4px; }
+  #ledger .litem { cursor:pointer; padding:7px 10px; border-radius:8px; border:1px solid rgba(120,160,220,.12);
+    background:rgba(16,26,20,.6); display:flex; align-items:center; gap:8px; }
+  #ledger .litem:hover { border-color:var(--neon); background:rgba(20,36,28,.7); }
+  #ledger .litem.cur { border-color:var(--neon); }
+  #ledger .litem .lname { flex:1; font:600 12px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#eaf1fb;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #ledger .litem .lcount { flex:0 0 auto; font-size:10px; font-weight:700; color:#04130c; background:var(--neon);
+    border-radius:5px; padding:1px 6px; }
+  #ledger .litem.warn .lcount { background:var(--amber); color:#241a02; }
+  #ledger .litem .ltime { flex:0 0 auto; font-size:10px; color:#6b7689; }
   #radar .ritem .rdir { font-size:10px; color:var(--ink); opacity:.7; }
   /* hotspot: tiles high in both churn and coupling are the most dangerous, so they sit on top and stand out most */
   #radar .ritem.hot { border-color:rgba(255,157,77,.55); background:rgba(46,28,16,.7); }
@@ -162,6 +181,13 @@
   <div id="radar" class="panel">
     <div class="rhd"><span class="rdot"></span>Issue radar · <b id="radarCount">0</b> to review</div>
     <div class="rlist" id="radarList"></div>
+  </div>
+
+  <!-- Change ledger: every file the agent changed this session, newest first. The temporal view that
+       complements the spatial tree, and survives compaction (it's UI state, not model context). -->
+  <div id="ledger" class="panel">
+    <div class="lhd"><span class="lhdot"></span>Changes this session · <b id="ledgerCount">0</b></div>
+    <div class="llist" id="ledgerList"></div>
   </div>
 
   <div id="cell">
@@ -674,6 +700,37 @@
   document.getElementById('cellBack').onclick=()=>document.getElementById('cell').classList.remove('show');
   addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('cell').classList.remove('show'); });
 
+  // ── Change ledger: the temporal "what did the agent change this session" list ──
+  const ledger = new Map(); // path -> { count, ts }
+  function relTime(ts){ const s=Math.max(0,(Date.now()-ts)/1000); if(s<60)return Math.round(s)+'s'; if(s<3600)return Math.round(s/60)+'m'; return Math.round(s/3600)+'h'; }
+  function noteChange(path, count){
+    if(!path) return;
+    const prev = ledger.get(path);
+    const c = Math.max(count||0, prev?prev.count:0, prev?0:1);
+    // bump the timestamp only when it's genuinely newer activity (count went up, or first time)
+    const ts = (!prev || c>prev.count) ? Date.now() : prev.ts;
+    ledger.set(path, { count:c, ts });
+    renderLedger();
+  }
+  function renderLedger(){
+    const el=document.getElementById('ledger'), list=document.getElementById('ledgerList');
+    document.getElementById('ledgerCount').textContent=ledger.size;
+    el.classList.toggle('on', ledger.size>0);
+    const rows=[...ledger.entries()].sort((a,b)=>b[1].ts-a[1].ts);
+    list.innerHTML='';
+    for(const [path,info] of rows){
+      const row=document.createElement('div');
+      row.className='litem'+(path===activePath?' cur':'')+(info.count>=3?' warn':'');
+      const nm=document.createElement('span'); nm.className='lname'; nm.textContent=path.split('/').pop(); nm.title=path;
+      const ct=document.createElement('span'); ct.className='lcount'; ct.textContent='×'+info.count;
+      const tm=document.createElement('span'); tm.className='ltime'; tm.textContent=relTime(info.ts);
+      row.appendChild(nm); row.appendChild(ct); row.appendChild(tm);
+      row.onclick=()=>{ setActive(path); openCell(path); };
+      list.appendChild(row);
+    }
+  }
+  setInterval(()=>{ if(ledger.size) renderLedger(); }, 15000); // keep the relative times fresh
+
   // ── WebSocket ──
   let lastCells=null;
   let socket=null;            // WS connection; keep the send pipe on standby, the view itself only watches
@@ -689,10 +746,13 @@
       if(m.type==='state'){
         if(m.payload && m.payload.root){ const r=m.payload.root.split('/').filter(Boolean); projectName=r[r.length-1]||'Project'; }
         lastCells=(m.payload&&m.payload.cells)||[]; render(lastCells, (m.payload&&m.payload.edges)||lastEdges);
+        // sync the ledger with any file that has been changed (covers local + remote)
+        for(const c of lastCells){ if((c.modification_count||0)>0 || c.status==='modified' || c.status==='error') noteChange(c.path, c.modification_count||1); }
       }
       else if(m.type==='active' && m.payload) setActive(m.payload.path);
       else if(m.type==='activity' && m.payload && m.payload.action!=='read'){
         contentByPath.delete(m.payload.path);   // File changed, so make that tile re-fetch the latest code
+        noteChange(m.payload.path, m.payload.count);
         setActive(m.payload.path);
       }
     };
