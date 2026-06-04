@@ -66,7 +66,8 @@
       "src/**/*",
       "package.json",
       "!src/cli/codex-agent.js",
-      "!node_modules/@openai/**"
+      "!node_modules/@openai/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",

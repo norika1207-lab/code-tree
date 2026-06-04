@@ -3,6 +3,28 @@
 // Auth, tool execution, context, and permissions are all handled by the SDK (borrowing the Claude Code login).
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { buildDepIndex, assessTool, isMutation } from '../masl/gate.js';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+
+// Use the user's already-installed Claude Code binary instead of the SDK's bundled 205MB copy.
+// Code Tree borrows the Claude Code login, so `claude` is always present; this keeps full SDK
+// power while shedding the duplicate binary from the package and the app.
+let _claudeBin;
+function systemClaude() {
+  if (_claudeBin !== undefined) return _claudeBin;
+  _claudeBin = (() => {
+    if (process.env.CODETREE_CLAUDE_BIN) return process.env.CODETREE_CLAUDE_BIN;
+    try {
+      const p = execFileSync('/usr/bin/which', ['claude'], { encoding: 'utf8' }).trim();
+      if (p) return p;
+    } catch {}
+    for (const p of ['/opt/homebrew/bin/claude', '/usr/local/bin/claude', `${process.env.HOME || ''}/.local/bin/claude`]) {
+      try { if (fs.existsSync(p)) return p; } catch {}
+    }
+    return null; // not found → let the SDK resolve on its own
+  })();
+  return _claudeBin;
+}
 
 // onEvent contract matches the old agent: {type:'text',delta} / {type:'tool',name,path,input}
 //   / {type:'active',path} / {type:'turn_end'} / {type:'error',message} / {type:'usage',usage}
@@ -33,6 +55,7 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
         canUseTool, // MASL: use the permission hook as the last gate, no more bypass
         includePartialMessages: true, // want the char-by-char streaming "thinking" text
         ...(model ? { model } : {}),
+        ...(systemClaude() ? { pathToClaudeCodeExecutable: systemClaude() } : {}),
       },
     });
 
