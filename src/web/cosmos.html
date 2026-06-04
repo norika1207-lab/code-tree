@@ -130,6 +130,10 @@
     border-radius:5px; padding:1px 6px; }
   #ledger .litem.warn .lcount { background:var(--amber); color:#241a02; }
   #ledger .litem .ltime { flex:0 0 auto; font-size:10px; color:#6b7689; }
+  #ledger .litem .lrev { flex:0 0 auto; font-size:13px; line-height:1; color:#9fb0c6; background:none; border:0;
+    cursor:pointer; padding:2px 4px; border-radius:5px; opacity:.55; }
+  #ledger .litem:hover .lrev { opacity:1; }
+  #ledger .litem .lrev:hover { color:var(--amber); background:rgba(255,207,77,.12); }
   #radar .ritem .rdir { font-size:10px; color:var(--ink); opacity:.7; }
   /* hotspot: tiles high in both churn and coupling are the most dangerous, so they sit on top and stand out most */
   #radar .ritem.hot { border-color:rgba(255,157,77,.55); background:rgba(46,28,16,.7); }
@@ -724,7 +728,9 @@
       const nm=document.createElement('span'); nm.className='lname'; nm.textContent=path.split('/').pop(); nm.title=path;
       const ct=document.createElement('span'); ct.className='lcount'; ct.textContent='×'+info.count;
       const tm=document.createElement('span'); tm.className='ltime'; tm.textContent=relTime(info.ts);
-      row.appendChild(nm); row.appendChild(ct); row.appendChild(tm);
+      const rv=document.createElement('button'); rv.className='lrev'; rv.textContent='⤺'; rv.title='Revert to how it was at session start';
+      rv.onclick=(e)=>{ e.stopPropagation(); rv.textContent='…'; send({ type:'revert', path }); };
+      row.appendChild(nm); row.appendChild(ct); row.appendChild(tm); row.appendChild(rv);
       row.onclick=()=>{ setActive(path); openCell(path); };
       list.appendChild(row);
     }

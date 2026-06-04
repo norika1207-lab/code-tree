@@ -35,6 +35,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   // The local graph/chokidar are bypassed; the tree comes from periodic remote snapshots.
   let remoteSnap = null;
   let remoteSource = null;
+  const baselines = new Map(); // absPath → original content at session start, for ledger "revert" (local mode)
   // Which folder the terminal opens in: defaults to the same place as the watch root; in no-project mode it can point at the home directory,
   // so the shell is immediately usable while the visualization doesn't have to scan all of home.
   const shellCwd = path.resolve(terminalCwd || root);
@@ -230,6 +231,11 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       if (!graph.isCode(p)) return;
       graph.ensureCell(p);
       reparse(p);
+      // Snapshot the original content at scan time so a ledger "revert" can restore the file to how it
+      // was before this session. Only at startup (pre-ready), and skip big files to stay light.
+      if (!ready && !baselines.has(p)) {
+        try { const st = fs.statSync(p); if (st.size <= 512 * 1024) baselines.set(p, fs.readFileSync(p, 'utf8')); } catch {}
+      }
       if (ready) {
         const cell = graph.record(p, 'create');
         emitActivity(cell, 'create');
@@ -500,6 +506,18 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       cliTok.cacheRead += u.cache_read_input_tokens || 0;
       cliTok.cacheWrite += u.cache_creation_input_tokens || 0;
       broadcastTokens();
+    } else if (msg.type === 'revert' && msg.path) {
+      // Restore a file to how it was at session start (local mode only). The watcher then catches the
+      // write as a change, so the tree + ledger update on their own.
+      if (remote) { broadcast({ type: 'agent_error', payload: { message: 'Revert is local-only for now (remote files edit over ssh).' } }); return; }
+      const abs = path.resolve(root, msg.path);
+      if (abs !== root && !abs.startsWith(root + path.sep)) return;
+      if (baselines.has(abs)) {
+        try { fs.writeFileSync(abs, baselines.get(abs)); logEvent('revert', msg.path); logRecord({ type: 'revert', path: msg.path }); }
+        catch (e) { broadcast({ type: 'agent_error', payload: { message: 'Revert failed: ' + e.message } }); }
+      } else {
+        broadcast({ type: 'agent_error', payload: { message: `No session-start snapshot for ${msg.path} (created this session?)` } });
+      }
     } else if (msg.type === 'tokens_clear') {
       // The "clear" button on the bar above the input box: set the current total as the new baseline, zeroing the numbers
       cliTok = null;
