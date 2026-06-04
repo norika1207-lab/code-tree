@@ -58,11 +58,14 @@
     box-shadow:0 10px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(150,185,235,.12); display:flex; flex-direction:column;
     transition:border-color .18s, box-shadow .18s, transform .18s; }
   .fcard:hover { border-color:#8fd9ff; box-shadow:0 12px 36px rgba(0,0,0,.62); transform:translateY(-2px); }
-  .fcard .hd { display:flex; align-items:center; gap:7px; padding:6px 9px; flex:0 0 auto;
-    background:rgba(44,58,82,.98); border-bottom:1px solid rgba(150,185,235,.3);
-    font:600 11px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#eef4ff; }
-  .fcard .hd .tl { display:flex; gap:4px; flex:0 0 auto; }
-  .fcard .hd .tl i { width:8px; height:8px; border-radius:50%; display:block; }
+  /* a label row, not a window title bar: no solid chrome, blends into the card */
+  .fcard .hd { display:flex; align-items:center; gap:7px; padding:7px 10px 5px; flex:0 0 auto;
+    font:600 11px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#cfe0ff; }
+  /* one status dot, color = real state (not decorative window buttons): gray idle, amber editing/changed, red anomaly */
+  .fcard .hd .st { width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:#3a4860; }
+  .fcard.active .st { background:var(--neon); box-shadow:0 0 8px var(--neon); }
+  .fcard.modified .st { background:var(--amber); box-shadow:0 0 7px var(--amber); }
+  .fcard.error .st { background:var(--red); box-shadow:0 0 8px var(--red); }
   .fcard .hd .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .fcard .hd .badge { margin-left:auto; flex:0 0 auto; font-size:9px; font-weight:700;
     padding:1px 6px; border-radius:5px; white-space:nowrap; }
@@ -244,12 +247,12 @@
     if(c.status==='modified' || c.modification_count) return ' modified';
     return '';
   }
+  // Badge text only for things that need your attention. Normal active/modified state is already
+  // carried by the border + the status dot, so don't repeat it as text (calm by default, loud on event).
   function cardBadge(c){
     if(c.anomaly==='repeat') return '⚠ Repeated '+(c.modification_count||'');
     if(c.anomaly==='stall') return '⚠ Stalled';
     if(c.status==='error') return '⚠ Error';
-    if(c.path===activePath || c.status==='active') return 'AI here';
-    if(c.status==='modified' || c.modification_count) return 'Modified';
     return '';
   }
   // The real code shown inside each tile (fetch /file, cache it; when the file changes, force a re-fetch)
@@ -382,8 +385,7 @@
       .style('transition',p=>`opacity .5s ease ${(p.oi||0)*55}ms, border-color .18s, box-shadow .18s, transform .18s`);
     const hd=card.append('xhtml:div').attr('class','hd');
     hd.append('xhtml:span').attr('class','seq');   // Birth order number
-    hd.append('xhtml:span').attr('class','tl')
-      .html('<i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>');
+    hd.append('xhtml:span').attr('class','st');    // one status dot (color carries real state), not fake window controls
     hd.append('xhtml:span').attr('class','nm');
     hd.append('xhtml:span').attr('class','badge');
     card.append('xhtml:pre').attr('class','bd');
