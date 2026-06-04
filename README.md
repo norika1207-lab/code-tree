@@ -14,14 +14,6 @@ It runs on Claude, borrowing your existing Claude Code login, so there is no sep
   <sub>The world-tree (<code>--web</code>): every block is a file, every line is a dependency. As the agent works, the file it touches lights up green and the camera flies to it. Real, unedited. (<a href="assets/world-tree-v2.mp4">MP4</a>)</sub>
 </p>
 
-<p align="center">
-  <img src="assets/demo.gif" alt="The terminal view: Claude reviewing the codebase, flow trail and token bar" width="900">
-</p>
-
-<p align="center">
-  <sub>The all-in-terminal view: same engine, no browser. Claude reviews this codebase live, the flow trail grows, and the token bar climbs as it burns. (<a href="assets/demo.mp4">MP4</a>)</sub>
-</p>
-
 ## Install
 
 Run it with no install:
@@ -85,6 +77,14 @@ In a real terminal (a TTY, so you can type):
 ```
 code-tree <path-to-your-project>
 ```
+
+<p align="center">
+  <img src="assets/demo.gif" alt="The all-in-terminal view: agent transcript, flow trail, live token bar" width="820">
+</p>
+
+<p align="center">
+  <sub>The all-in-terminal view, no browser: the agent transcript on the left, a flow trail on the right, the token bar climbing as it burns. (<a href="assets/demo.mp4">MP4</a>)</sub>
+</p>
 
 - Type a prompt, press Enter. The agent starts editing; the view follows it cell by cell.
 - Tab toggles Focus view and the full Tree view.
