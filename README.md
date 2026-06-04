@@ -7,11 +7,11 @@ A coding-agent CLI whose view follows whatever file the agent touches. You type 
 It runs on Claude, borrowing your existing Claude Code login, so there is no separate API key to set up. No cloud login at all? It also drives a local model (Ollama, vLLM, llama.cpp) with zero login.
 
 <p align="center">
-  <img src="assets/world-tree-v2.gif" alt="The world-tree: each file is a block, lines are dependencies, the camera follows the agent" width="900">
+  <img src="assets/world-tree-v3.gif" alt="Code Tree: a real Claude agent fixing a bug, watched live as a world-tree with a change ledger" width="900">
 </p>
 
 <p align="center">
-  <sub>The world-tree (<code>--web</code>): every block is a file, every line is a dependency. As the agent works, the file it touches lights up green and the camera flies to it. Real, unedited. (<a href="assets/world-tree-v2.mp4">MP4</a>)</sub>
+  <sub>Real, unedited: a Claude agent fixes a bug while you watch. Left, the terminal. Right, the world-tree (every block a file, every line a dependency) with the camera following each edit. Top-right, the change ledger: every file it touched, the tokens it burned there, and a one-click revert. (<a href="assets/world-tree-v3.mp4">MP4</a>)</sub>
 </p>
 
 ## Install
@@ -109,15 +109,14 @@ A scripted agent replays a scenario: it edits `session-store.js` three times cha
 
 ## What's inside
 
-- Native agent CLI: prompt streaming to a read/edit/write tool loop
-- Focus view: the camera follows the file the agent is editing, with a trail
-- Tree view: your whole codebase as a live tree, status-colored, repeated edits flagged
-- Token bar: real burn for this session, plus a machine-wide "cost of not clearing your stale cache" figure in USD
-- MASL safety gate: speaks up only on the four things that actually matter (irreversible shell commands, breaking a public interface others import, going off-script, and thrashing the same file) instead of nagging on every edit
-- Session recording: from open to close, the whole CLI transcript is written to a txt file for later review
-- Anomaly detection: same file edited 3+ times flashes red, stalls over 10 minutes, recurring errors
-- Borrows Claude Code OAuth (Keychain), falls back to API key
-- No-login local mode: drives a local OpenAI-compatible model (Ollama / vLLM / llama.cpp) with zero cloud login, auto-detected
+- World-tree: your whole codebase as a living tree, every block a file, every line an import. The camera follows the file the agent is editing; repeated edits flash red.
+- Change ledger: a running list of every file the agent changed this session, with the tokens burned on each, and a one-click revert to its state at session start. The temporal view that survives compaction, because it lives on disk, not in the model's context.
+- Cross-session memory: each finished task is recorded per project; the next similar task recalls it ("Recalled 3 past fixes"), so the agent gets more familiar with your codebase the more you use it.
+- Token attribution: see where the tokens actually went, tied to the files that caused the burn.
+- MASL safety gate: speaks up only on the four things that matter (irreversible shell commands, breaking a public interface others import, going off-script, thrashing the same file) instead of nagging on every edit.
+- Remote projects over ssh: `code-tree host:/path` maps a codebase that lives on another machine, for people who do their real work over ssh. Blocks, import lines and revert all work over plain ssh.
+- Session recording: the whole session is written to a txt transcript and a structured `.jsonl` for later review and training.
+- Runs on Claude (borrowed Claude Code login, no extra key), or fully offline on a local model (Ollama / vLLM / llama.cpp) with zero cloud login.
 
 ## How it works
 
