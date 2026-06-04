@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { WS_PORT, WEB_PORT, isIgnored, ANOMALY } from '../config.js';
 import { Graph } from './state.js';
 import { parseImports } from './parser.js';
+import { createRemoteSource } from './remote-source.js';
 import { createRunner } from './runner.js';
 import { createSdkAgent } from '../cli/sdk-agent.js';
 import { createRoutedAgent } from '../cli/routed-agent.js';
@@ -28,8 +29,12 @@ const LOCAL_DISCIPLINE = `(Important work discipline)
 - Only when the entire task is truly done should you give a final plain-text wrap-up; do not emit any tool call on that turn.`;
 
 // makeAgent is injectable: defaults to the SDK agent (borrowing Claude Code's login); tests swap in scripted (burns no token).
-export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_PORT, quiet = false, makeAgent, terminalCwd, projectLabel, noProject = false } = {}) {
+export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_PORT, quiet = false, makeAgent, terminalCwd, projectLabel, noProject = false, remote = null } = {}) {
   root = path.resolve(root);
+  // Remote mode: the project lives on another machine, mapped over ssh (see remote-source.js).
+  // The local graph/chokidar are bypassed; the tree comes from periodic remote snapshots.
+  let remoteSnap = null;
+  let remoteSource = null;
   // Which folder the terminal opens in: defaults to the same place as the watch root; in no-project mode it can point at the home directory,
   // so the shell is immediately usable while the visualization doesn't have to scan all of home.
   const shellCwd = path.resolve(terminalCwd || root);
@@ -73,6 +78,13 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     // /file?path=rel → return a single file's content (click a cell to drill in and see the code being run)
     if (u.pathname === '/file') {
       const rel = u.searchParams.get('path') || '';
+      // Remote mode: serve the content fetched over ssh (the file doesn't exist locally)
+      if (remote) {
+        const txt = remoteSource?.getContent(rel);
+        if (typeof txt === 'string') { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }); res.end(txt); }
+        else { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not in latest remote scan'); }
+        return;
+      }
       const abs = path.resolve(root, rel);
       if (abs !== root && !abs.startsWith(root + path.sep)) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
@@ -163,8 +175,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     logBroadcast(msg);
   }
 
+  // In remote mode the tree comes from the latest ssh snapshot; otherwise from the local graph.
+  function currentSnapshot() { return remoteSnap || graph.snapshot(); }
   function pushState() {
-    broadcast({ type: 'state', payload: graph.snapshot() });
+    broadcast({ type: 'state', payload: currentSnapshot() });
   }
 
   // ── Agent runner: lets the browser (or CLI) dispatch a prompt over WS, with the agent running here in core ──
@@ -248,11 +262,33 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       pushState();
     });
   }
-  attachWatcher();
+  if (remote) {
+    // Remote project over ssh: poll instead of watching the local FS.
+    remoteSource = createRemoteSource({
+      host: remote.host,
+      root: remote.root,
+      onSnapshot: (snap) => {
+        remoteSnap = snap;
+        broadcast({ type: 'state', payload: snap });
+        // a remotely-edited file → fly the camera there and expand it, like a local agent_active
+        if (snap.changed && snap.changed.length) {
+          broadcast({ type: 'active', payload: { path: snap.changed[0], id: snap.changed[0] } });
+        }
+      },
+      onStatus: (s) => {
+        if (s.ok) log(`remote scan: ${s.files} files on ${s.host}:${s.root}`);
+        else { log(`remote scan failed: ${s.error}`); broadcast({ type: 'agent_error', payload: { message: `Remote (${s.host}): ${s.error}` } }); }
+      },
+    });
+    remoteSource.start();
+  } else {
+    attachWatcher();
+  }
 
   // Switch the watch root: the terminal cd's into another project → the right side regrows that project. WS / web server stay put,
   // the same connection just swaps the underlying graph, does one pushState after rescanning, and the view smoothly switches to the new project.
   function reroot(newDir) {
+    if (remote) return; // in remote mode the tree is pinned to the remote project, local cd doesn't reroot
     const resolved = path.resolve(newDir);
     if (resolved === root) return;
     log('reroot ->', resolved);
@@ -369,7 +405,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   // ── WebSocket: CLI, visualization, and terminal all connect here ──
   wss.on('connection', (ws) => {
     clients.add(ws);
-    ws.send(JSON.stringify({ type: 'state', payload: graph.snapshot() }));
+    ws.send(JSON.stringify({ type: 'state', payload: currentSnapshot() }));
     ws.send(JSON.stringify({ type: 'tokens', payload: tokensSnapshot() }));
     let pty = null; // this connection's own shell (opened only when the terminal pane requests it)
     let slog = null; // this connection's session transcript (opened only once the pty is up)
@@ -504,6 +540,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       for (const l of sessionLogs) l.close('core shutdown');
       sessionLogs.clear();
       if (watcher) watcher.close();
+      if (remoteSource) remoteSource.stop();
       wss.close();
       webServer.close();
     },

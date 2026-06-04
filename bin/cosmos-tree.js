@@ -6,6 +6,7 @@
 import { createElement as h, useState, useEffect, useRef } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 import net from 'node:net';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
@@ -71,12 +72,31 @@ if (positional[0] === 'login' || positional[0] === 'status') {
 }
 
 const DEMO = flags.has('--demo');
-const target = DEMO ? path.join(REPO_ROOT, 'sample') : path.resolve(positional[0] || process.cwd());
+
+// Remote project over ssh: `code-tree host:/path/to/project` or `code-tree ssh://host/path`.
+// The world-tree maps the project on that machine (for people who do their real work over ssh).
+function parseRemote(arg) {
+  if (!arg) return null;
+  let m = arg.match(/^ssh:\/\/([^/]+)(\/.*)$/);
+  if (m) return { host: m[1], root: m[2] };
+  // host:/abs/path  (the ':' + a path; exclude local existing paths and bare drive letters)
+  m = arg.match(/^([A-Za-z0-9._@-]+):(\/?\S+)$/);
+  if (m && !arg.startsWith('/') && !arg.startsWith('.')) {
+    // only treat as remote if it isn't actually a local file/dir
+    try { if (fs.existsSync(arg)) return null; } catch {}
+    return { host: m[1], root: m[2] };
+  }
+  return null;
+}
+const remote = DEMO ? null : parseRemote(positional[0]);
+const target = DEMO ? path.join(REPO_ROOT, 'sample')
+  : remote ? process.env.HOME || process.cwd() // shell opens at home; the tree is the remote project
+  : path.resolve(positional[0] || process.cwd());
 if (DEMO) resetSample(target);
 
 // ── start core (reuse the existing one if it's already running) ──
 const alreadyRunning = await portInUse(WS_PORT);
-const core = alreadyRunning ? null : startCore({ root: target, port: WS_PORT, quiet: true });
+const core = alreadyRunning ? null : startCore({ root: target, port: WS_PORT, quiet: true, remote, projectLabel: remote ? `${remote.host}:${remote.root}` : undefined });
 
 // By default everything lives in the terminal, no browser pops up. Use --web to open the full world-tree web view.
 if (flags.has('--web')) {
