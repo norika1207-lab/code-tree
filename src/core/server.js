@@ -152,17 +152,22 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   // ── Session transcript: each pty (one CLI launch) gets a logger that writes the whole run to a txt file. ──
   const sessionLogs = new Set();
   function logEvent(tag, text) { for (const l of sessionLogs) l.event(tag, text); }
+  function logRecord(obj) { for (const l of sessionLogs) l.record(obj); } // clean structured event → .jsonl (change ledger / memory)
   // Also record the agent actions from the "web dispatch" flow (which bypasses the terminal pane) into the transcript, so it's a "complete record".
   function logBroadcast(msg) {
     if (!sessionLogs.size || !msg || !msg.payload) return;
     const p = msg.payload;
     switch (msg.type) {
-      case 'prompt': logEvent('prompt', p.text); break;
+      case 'prompt': logEvent('prompt', p.text); logRecord({ type: 'prompt', text: p.text }); break;
       case 'agent_text': for (const l of sessionLogs) l.stream('agent', p.delta); break;
-      case 'agent_tool': logEvent('tool', `${p.name}${p.path ? ' → ' + p.path : ''}`); break;
-      case 'agent_error': logEvent('error', p.message); break;
-      case 'gate': logEvent('MASL', p.report && p.report.reason ? p.report.reason : 'gate'); break;
-      case 'anomaly': logEvent('anomaly', p.message); break;
+      case 'agent_tool':
+        logEvent('tool', `${p.name}${p.path ? ' → ' + p.path : ''}`);
+        // edit/write are the real "changes"; read/list are just inspection — tag accordingly so the ledger can show only changes
+        logRecord({ type: /edit|write/i.test(p.name) ? 'change' : 'tool', tool: p.name, path: p.path || null });
+        break;
+      case 'agent_error': logEvent('error', p.message); logRecord({ type: 'error', text: p.message }); break;
+      case 'gate': logEvent('MASL', p.report && p.report.reason ? p.report.reason : 'gate'); logRecord({ type: 'gate', path: p.report?.targetRel || null, reason: p.report?.reason || null }); break;
+      case 'anomaly': logEvent('anomaly', p.message); logRecord({ type: 'anomaly', text: p.message }); break;
       default: break;
     }
   }
