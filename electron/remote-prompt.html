@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { --neon:#4dffb0; --ink:#eaf1fb; --line:#16202f; }
+  html,body { margin:0; height:100%; background:#0b0f17; color:var(--ink);
+    font-family:-apple-system,"PingFang TC",system-ui,sans-serif; }
+  .wrap { padding:18px 20px; display:flex; flex-direction:column; gap:12px; height:100%; box-sizing:border-box; }
+  h1 { font-size:14px; margin:0; color:var(--neon); letter-spacing:.3px; }
+  p { margin:0; font-size:12px; color:#9fb0c6; line-height:1.5; }
+  input { width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px;
+    background:#060b14; color:var(--ink); border:1px solid var(--line); border-radius:8px;
+    font-family:ui-monospace,Menlo,monospace; outline:none; }
+  input:focus { border-color:var(--neon); }
+  .row { display:flex; gap:10px; justify-content:flex-end; margin-top:auto; }
+  button { padding:8px 16px; font-size:13px; border-radius:8px; border:1px solid var(--line);
+    background:#0e1622; color:var(--ink); cursor:pointer; }
+  button.go { background:var(--neon); color:#04130c; border-color:var(--neon); font-weight:600; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🌳 Open a remote project (ssh)</h1>
+    <p>Type the host and path. Uses your ~/.ssh/config aliases and keys.<br>
+       e.g. <code>sportverse:/opt/battle_arena</code> or <code>ssh://host/path</code></p>
+    <input id="spec" placeholder="host:/path/to/project" autofocus spellcheck="false" />
+    <div class="row">
+      <button onclick="window.rp.cancel()">Cancel</button>
+      <button class="go" onclick="go()">Open</button>
+    </div>
+  </div>
+  <script>
+    const el = document.getElementById('spec');
+    function go(){ const v = el.value.trim(); if (v) window.rp.submit(v); }
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); if (e.key === 'Escape') window.rp.cancel(); });
+    el.focus();
+  </script>
+</body>
+</html>

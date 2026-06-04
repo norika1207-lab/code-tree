@@ -51,10 +51,11 @@ function scratchRoot() {
 
 function startOn(root, opts = {}) {
   if (core) { try { core.close(); } catch {} core = null; }
-  logln('startCore on', root, 'shell cwd', opts.terminalCwd || root);
+  logln('startCore on', root, 'shell cwd', opts.terminalCwd || root, opts.remote ? `remote ${opts.remote.host}:${opts.remote.root}` : '');
   core = startCore({
     root, terminalCwd: opts.terminalCwd,
     projectLabel: opts.label, noProject: !!opts.noProject, quiet: false,
+    remote: opts.remote || null,
   });
   logln('core webPort', core.webPort, 'wsPort', core.port);
   if (opts.remember !== false) savePrefs({ lastProject: root });   // only remember real projects, not the no-project scratch
@@ -94,6 +95,39 @@ function openNoProject() {
   openProjectFlow(scratchRoot(), { terminalCwd: os.homedir(), label: 'No project', noProject: true, remember: false });
 }
 
+// Remote project over ssh: map a codebase that lives on another machine. `spec` is host:/path or ssh://host/path.
+function parseRemoteSpec(spec) {
+  if (!spec) return null;
+  spec = spec.trim();
+  let m = spec.match(/^ssh:\/\/([^/]+)(\/.*)$/);
+  if (m) return { host: m[1], root: m[2] };
+  m = spec.match(/^([A-Za-z0-9._@-]+):(\/?\S+)$/);
+  if (m) return { host: m[1], root: m[2] };
+  return null;
+}
+function openRemoteFlow(spec) {
+  const remote = parseRemoteSpec(spec);
+  if (!remote) { dialog.showMessageBox({ type: 'warning', message: 'Could not parse that. Use host:/path or ssh://host/path', detail: spec || '' }); return; }
+  // the local watch root is just a scratch dir; the tree comes from the remote project
+  openProjectFlow(scratchRoot(), { terminalCwd: os.homedir(), label: `${remote.host}:${remote.root}`, remote, remember: false });
+}
+
+// A small input window to type the remote target (Electron has no native text-prompt dialog).
+let promptWin = null;
+function openRemotePrompt() {
+  if (promptWin) { promptWin.focus(); return; }
+  promptWin = new BrowserWindow({
+    width: 520, height: 200, resizable: false, parent: win || undefined, modal: !!win,
+    title: 'Open remote project', backgroundColor: '#0b0f17',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'remote-preload.cjs') },
+  });
+  promptWin.setMenuBarVisibility(false);
+  promptWin.loadFile(path.join(__dirname, 'remote-prompt.html'));
+  promptWin.on('closed', () => { promptWin = null; });
+}
+ipcMain.on('ct:remote-submit', (_e, spec) => { if (promptWin) { promptWin.close(); } openRemoteFlow(spec); });
+ipcMain.on('ct:remote-cancel', () => { if (promptWin) promptWin.close(); });
+
 // Buttons in the bottom bar → reach here via preload
 ipcMain.handle('ct:pick-project', async () => {
   const root = await pickProject();
@@ -111,6 +145,10 @@ function buildMenu() {
         {
           label: 'Open another project…', accelerator: 'CmdOrCtrl+O',
           click: async () => { const root = await pickProject(); if (root) openProjectFlow(root); },
+        },
+        {
+          label: 'Open remote project (ssh)…', accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => openRemotePrompt(),
         },
         {
           label: 'Terminal only (no project)', accelerator: 'CmdOrCtrl+N',
