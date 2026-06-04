@@ -1,5 +1,5 @@
 {
-  "name": "@norikaoda/code-tree",
+  "name": "code-tree",
   "version": "0.1.0",
   "description": "Watch your AI coding agent work in real time: a live world-tree of your codebase where the camera follows whatever file the agent touches, with token-waste metering and a safety gate.",
   "type": "module",
