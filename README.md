@@ -7,11 +7,11 @@ A coding-agent CLI whose view follows whatever file the agent touches. You type 
 It runs on Claude, borrowing your existing Claude Code login, so there is no separate API key to set up. No cloud login at all? It also drives a local model (Ollama, vLLM, llama.cpp) with zero login.
 
 <p align="center">
-  <img src="assets/world-tree.gif" alt="The world-tree: each file is a block, lines are dependencies, the camera follows the agent" width="900">
+  <img src="assets/world-tree-v2.gif" alt="The world-tree: each file is a block, lines are dependencies, the camera follows the agent" width="900">
 </p>
 
 <p align="center">
-  <sub>The world-tree (<code>--web</code>): every block is a file, every line is a dependency. As the agent works, the file it touches lights up green and the camera flies to it. Real, unedited. (<a href="assets/world-tree.mp4">MP4</a>)</sub>
+  <sub>The world-tree (<code>--web</code>): every block is a file, every line is a dependency. As the agent works, the file it touches lights up green and the camera flies to it. Real, unedited. (<a href="assets/world-tree-v2.mp4">MP4</a>)</sub>
 </p>
 
 <p align="center">
