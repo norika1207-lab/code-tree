@@ -506,6 +506,9 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       cliTok.cacheRead += u.cache_read_input_tokens || 0;
       cliTok.cacheWrite += u.cache_creation_input_tokens || 0;
       broadcastTokens();
+    } else if (msg.type === 'recall') {
+      // the CLI agent recalled past trajectories → surface it in the browser too
+      broadcast({ type: 'recall', payload: { count: msg.count || 1, text: msg.text || '' } });
     } else if (msg.type === 'revert' && msg.path) {
       // Restore a file to how it was at session start (local mode only). The watcher then catches the
       // write as a change, so the tree + ledger update on their own.

@@ -288,6 +288,13 @@ function App() {
           if (wsRef.current?.readyState === 1) {
             wsRef.current.send(JSON.stringify({ type: 'cli_usage', usage: e.usage }));
           }
+        } else if (e.type === 'recall') {
+          // cross-session memory kicked in → show it in the CLI feed and surface it in the browser
+          const n = (e.text.match(/^- Task:/gm) || []).length || 1;
+          pushFeed({ kind: 'tool', name: `💡 recalled ${n} past fix${n > 1 ? 'es' : ''} in this project`, path: '' });
+          if (wsRef.current?.readyState === 1) {
+            wsRef.current.send(JSON.stringify({ type: 'recall', count: n, text: e.text.slice(0, 600) }));
+          }
         } else if (e.type === 'tier') {
           setTier(e.name);
           pushFeed({ kind: 'tool', name: e.index === 0 ? `↳ using ${e.name} (trying the cheap one first)` : `↗ escalating to ${e.name}`, path: '' });
@@ -322,7 +329,7 @@ function App() {
                   systemSuffix: LOCAL_DISCIPLINE,
                   sdkOpts: { getState, onGate, lastSaid },
                 })
-              : createSdkAgent({ root: target, model: modelArg, emit, onEvent, getState, onGate, lastSaid });
+              : createSdkAgent({ root: target, model: modelArg, emit, onEvent, getState, onGate, lastSaid, memory: createMemory({ root: target, model: 'claude' }) });
 
       if (DEMO) {
         setTimeout(() => runPrompt('fix the intermittent session failure bug'), 700);

@@ -33,7 +33,7 @@ function systemClaude() {
 //   getState() → { cells, edges, root } (the latest snapshot the CLI received from core)
 //   onGate(report, agentSaid) → Promise<boolean> (true to allow / false to block)
 //   lastSaid() → the agent's most recent sentence, used as a clue for "why change it this way"
-export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, lastSaid }) {
+export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, lastSaid, memory }) {
   // MASL interception: read-only tools pass straight through; acting tools (Write/Edit/Bash…) go through the gate first.
   async function canUseTool(toolName, input) {
     if (!isMutation(toolName) || !onGate) return { behavior: 'allow', updatedInput: input };
@@ -48,8 +48,16 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
   }
 
   async function send(userText) {
+    // Cross-session recall: pull this project's past similar fixes and prepend them, so the agent
+    // stands on prior trajectories (survives compaction — it's on disk, not in the model's context).
+    let recalled = '';
+    try { recalled = memory?.recall?.(userText) || ''; } catch {}
+    if (recalled) onEvent({ type: 'recall', text: recalled });
+    const filesModified = new Set();
+    let lastText = '';
+
     const q = query({
-      prompt: userText,
+      prompt: recalled ? `${recalled}\n\n---\nTask: ${userText}` : userText,
       options: {
         cwd: root,
         canUseTool, // MASL: use the permission hook as the last gate, no more bypass
@@ -65,6 +73,7 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
           const ev = msg.event;
           if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
             onEvent({ type: 'text', delta: ev.delta.text });
+            lastText += ev.delta.text;
           }
         } else if (msg.type === 'assistant') {
           // each inference step's token usage → feed the CLI's token bar (accumulated live)
@@ -76,6 +85,7 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
               if (p) {
                 onEvent({ type: 'active', path: p }); // view jumps to this cell
                 if (block.name === 'Read') emit?.('read', p); // a read → light up that cell in core
+                else if (/Write|Edit/.test(block.name)) filesModified.add(p); // track changes for the memory trajectory
               }
             }
           }
@@ -83,6 +93,16 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
           if (msg.is_error) {
             onEvent({ type: 'error', message: (msg.result ?? msg.errors ?? 'Execution failed').toString() });
           }
+          // Record this run so the next similar task in this project can recall it.
+          try {
+            memory?.record?.({
+              task: userText,
+              filesModified: [...filesModified],
+              summary: (msg.result || lastText || '').toString().slice(-500),
+              endedCleanly: !msg.is_error && filesModified.size > 0,
+              toolCount: filesModified.size,
+            });
+          } catch {}
           onEvent({ type: 'turn_end' });
         }
       }
