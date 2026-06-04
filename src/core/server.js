@@ -348,6 +348,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   // When Code Tree's own agent runs (direct API, not the claude CLI) it pushes real usage over WS.
   // That doesn't land in the Claude Code session JSONL, so prefer the pushed totals when present.
   let cliTok = null; // { input, output, cacheRead, cacheWrite } accumulated from cli_usage
+  let lastActivePath = null;           // which file the agent is on right now (for token attribution)
+  const tokenByFile = new Map();       // path → burned tokens spent while that file was active (a heuristic, labelled "~")
   function tokensSnapshot() {
     if (cliTok) {
       const { input, output, cacheRead, cacheWrite } = cliTok;
@@ -489,6 +491,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       // The CLI reports which cell the agent is on → broadcast it so the 3D camera flies there
       const abs = path.resolve(root, msg.path);
       const cell = graph.record(abs, 'active');
+      lastActivePath = cell.path; // remember for token attribution
       broadcast({ type: 'active', payload: { path: cell.path, id: abs } });
       pushState();
     } else if (msg.type === 'run' && msg.text) {
@@ -506,6 +509,14 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       cliTok.cacheRead += u.cache_read_input_tokens || 0;
       cliTok.cacheWrite += u.cache_creation_input_tokens || 0;
       broadcastTokens();
+      // attribute this turn's burn to the file the agent is currently on → "where the tokens went"
+      const burn = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      if (lastActivePath && burn > 0) {
+        const t = (tokenByFile.get(lastActivePath) || 0) + burn;
+        tokenByFile.set(lastActivePath, t);
+        broadcast({ type: 'token_by_file', payload: { path: lastActivePath, total: t } });
+        for (const l of sessionLogs) l.record({ type: 'usage', path: lastActivePath, burn });
+      }
     } else if (msg.type === 'recall') {
       // the CLI agent recalled past trajectories → surface it in the browser too
       broadcast({ type: 'recall', payload: { count: msg.count || 1, text: msg.text || '' } });
