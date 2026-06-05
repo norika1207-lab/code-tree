@@ -228,7 +228,30 @@
 
   const getTab = (id) => tabs.find(t => t.id === id);
   const active = () => getTab(activeId);
-  function fitActive(){ const t = active(); if (t) { try { t.fit.fit(); } catch {} } }
+  // Compute the real char-cell size from xterm's renderer (fall back to a font-based estimate).
+  function cellDims(term){
+    try {
+      const d = term._core && term._core._renderService && term._core._renderService.dimensions;
+      const c = d && (d.css ? d.css.cell : (d.actualCellWidth ? { width:d.actualCellWidth, height:d.actualCellHeight } : null));
+      if (c && c.width > 1 && c.height > 1) return { w:c.width, h:c.height };
+    } catch {}
+    const fs = (term.options && term.options.fontSize) || 13;
+    const lh = (term.options && term.options.lineHeight) || 1.2;
+    return { w: fs * 0.6, h: fs * lh };
+  }
+  // Bulletproof fit: size the grid to the visible pane in pixels and push the true size to the pty, so
+  // full-screen TUIs (claude, vim, top) fill the terminal and pin their input to the very bottom.
+  function fitTab(t){
+    if (!t || !t.pane || !t.pane.classList.contains('active')) return;
+    const W = t.pane.clientWidth, H = t.pane.clientHeight;
+    if (W < 24 || H < 24) return;
+    const { w, h } = cellDims(t.term);
+    const cols = Math.max(20, Math.floor((W - 16) / w));   // 8px pane padding each side
+    const rows = Math.max(6,  Math.floor((H - 12) / h));   // 6px pane padding top/bottom
+    if (cols !== t.term.cols || rows !== t.term.rows) { try { t.term.resize(cols, rows); } catch {} }
+    if (t.started) send({ type:'pty_resize', sessionId:t.id, cols:t.term.cols, rows:t.term.rows });
+  }
+  function fitActive(){ fitTab(active()); }
 
   function makeTab(){
     const id = 't' + (++seq) + Math.random().toString(36).slice(2,5);
@@ -266,11 +289,7 @@
     // 24 rows while the pane is taller, so full-screen TUIs (claude, vim) draw in the top half and their input
     // box ends up stranded in the middle with empty space below. Re-fit + tell the pty its real size whenever
     // the visible pane changes size (initial layout, window resize, divider drag).
-    const ro = new ResizeObserver(() => {
-      if (!pane.classList.contains('active') || pane.clientHeight < 16) return; // only the on-screen pane
-      try { fit.fit(); } catch {}
-      if (t.started && term.cols && term.rows) send({ type:'pty_resize', sessionId:id, cols:term.cols, rows:term.rows });
-    });
+    const ro = new ResizeObserver(() => { fitTab(t); });
     try { ro.observe(pane); } catch {}
     t.ro = ro;
     if (socket && socket.readyState === 1) startTab(t);
@@ -286,14 +305,17 @@
     } catch {}
     send({ type:'pty_start', sessionId:t.id, cols:t.term.cols||80, rows:t.term.rows||24 });
     t.started = true;
-    // After the pane is laid out, fit once more and push the true size to the pty so full-screen TUIs fill it.
-    requestAnimationFrame(() => { try { t.fit.fit(); } catch {} send({ type:'pty_resize', sessionId:t.id, cols:t.term.cols, rows:t.term.rows }); });
+    // Layout can settle a frame or two after the pane appears; re-fit at several beats so the pty ends up at
+    // the real visible size (full-screen TUIs then fill the terminal, input pinned to the bottom).
+    requestAnimationFrame(() => fitTab(t));
+    [60, 200, 500, 900].forEach((ms) => setTimeout(() => fitTab(t), ms));
   }
   function switchTab(id){
     activeId = id;
     for (const t of tabs){ const on = t.id===id; t.pane.classList.toggle('active', on); t.btn.classList.toggle('active', on); }
-    const t = active(); if (t){ try { t.fit.fit(); } catch {} t.term.focus();
-      send({ type:'pty_resize', sessionId:id, cols:t.term.cols, rows:t.term.rows });
+    const t = active(); if (t){ t.term.focus();
+      requestAnimationFrame(() => fitTab(t));
+      setTimeout(() => fitTab(t), 120);
       send({ type:'tab_active', sessionId:id }); }   // the world-tree follows this tab's cwd
   }
   function closeTab(id){
@@ -407,11 +429,7 @@
   })();
 
   // Window / divider changes → re-fit the active terminal and tell its shell the new size
-  function relayout(){
-    const t = active(); if (!t) return;
-    try { t.fit.fit(); } catch {}
-    if (t.started) send({ type:'pty_resize', sessionId:t.id, cols:t.term.cols, rows:t.term.rows });
-  }
+  function relayout(){ fitTab(active()); }
   addEventListener('resize', relayout);
 
   // Drag the middle grip: adjust the left/right ratio
