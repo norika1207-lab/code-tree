@@ -273,25 +273,45 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       pushState();
     });
   }
-  if (remote) {
-    // Remote project over ssh: poll instead of watching the local FS.
+  // Switch the world-tree to a remote project over ssh (poll instead of watching the local FS).
+  // Called automatically when the terminal ssh's into a host and cd's into a project (auto-follow),
+  // or manually via a remote target. No-ops if already on this host:root.
+  function enterRemote(host, root) {
+    root = String(root || '').replace(/\/$/, '');
+    if (!host || !root || root === '~' || root === '/') return;
+    if (remote && remote.host === host && remote.root === root) return;
+    if (watcher) { try { watcher.close(); } catch {} watcher = null; }
+    if (remoteSource) { remoteSource.stop(); remoteSource = null; }
+    remote = { host, root };
+    remoteSnap = null;
+    log(`auto-follow → remote ${host}:${root}`);
     remoteSource = createRemoteSource({
-      host: remote.host,
-      root: remote.root,
+      host, root,
       onSnapshot: (snap) => {
         remoteSnap = snap;
         broadcast({ type: 'state', payload: snap });
-        // a remotely-edited file → fly the camera there and expand it, like a local agent_active
-        if (snap.changed && snap.changed.length) {
-          broadcast({ type: 'active', payload: { path: snap.changed[0], id: snap.changed[0] } });
-        }
+        if (snap.changed && snap.changed.length) broadcast({ type: 'active', payload: { path: snap.changed[0], id: snap.changed[0] } });
       },
       onStatus: (s) => {
         if (s.ok) log(`remote scan: ${s.files} files on ${s.host}:${s.root}`);
-        else { log(`remote scan failed: ${s.error}`); broadcast({ type: 'agent_error', payload: { message: `Remote (${s.host}): ${s.error}` } }); }
+        else broadcast({ type: 'agent_error', payload: { message: `Remote (${s.host}): ${s.error}` } });
       },
     });
     remoteSource.start();
+    broadcast({ type: 'project', payload: { root: `${host}:${root}`, label: `${host}:${root.split('/').pop()}`, remote: true } });
+  }
+  // Back to the local project when the ssh session ends.
+  function exitRemote() {
+    if (!remote) return;
+    log('auto-follow ← back to local');
+    if (remoteSource) { remoteSource.stop(); remoteSource = null; }
+    remote = null; remoteSnap = null;
+    attachWatcher();
+    broadcast({ type: 'project', payload: { root, label: projLabel } });
+  }
+
+  if (remote) {
+    const r = remote; remote = null; enterRemote(r.host, r.root); // start in remote mode if launched that way
   } else {
     attachWatcher();
   }
@@ -421,7 +441,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     ws.send(JSON.stringify({ type: 'state', payload: currentSnapshot() }));
     ws.send(JSON.stringify({ type: 'tokens', payload: tokensSnapshot() }));
     // One connection can hold several independent shells (tabs). Each is keyed by a sessionId from the page.
-    const ptys = new Map(); // sessionId → { pty, slog }
+    const ptys = new Map(); // sessionId → { pty, slog, sshTarget, outbuf }
+    let activePtyId = null;  // which tab is in front → only its stream drives the auto-follow
 
     async function startPty(sessionId, cols, rows) {
       sessionId = sessionId || 'default';
@@ -443,8 +464,9 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       });
       // Each tab records its own transcript.
       const slog = createSessionLogger({ root, label: projLabel });
-      const entry = { pty, slog };
+      const entry = { pty, slog, sshTarget: null, outbuf: '', inbuf: '' };
       ptys.set(sessionId, entry);
+      activePtyId = sessionId;
       if (slog.ok) {
         sessionLogs.add(slog);
         ws.send(JSON.stringify({ type: 'session_log', sessionId, payload: { file: slog.file } }));
@@ -452,6 +474,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       pty.onData((d) => {
         if (slog) slog.stream('term', d);
         if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pty_output', sessionId, data: d }));
+        if (sessionId === activePtyId) detectRemoteFromOutput(entry, d); // auto-follow ssh sessions
       });
       pty.onExit(() => {
         ws.send(JSON.stringify({ type: 'pty_exit', sessionId }));
@@ -459,6 +482,37 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         ptys.delete(sessionId);
       });
       startCwdFollow(pty.pid); // the newly-opened (active) tab drives the world-tree's cwd-follow
+    }
+
+    // ── Auto-follow ssh: watch the active terminal's stream. When the user ssh's into a host and the
+    // remote prompt shows a project path, switch the world-tree to that remote project — no button. ──
+    const ANSI = /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>]/g;
+    // default bash prompt: user@host:cwd$  (cwd is /abs or ~). Capture the last one in the buffer.
+    const PROMPT_RE = /([\w.-]+)@([\w.-]+):((?:\/|~)[^\s#$\x1b]*)\s*[#$]\s*$/;
+    // Accumulate typed input; when a line is entered, learn the ssh target (the reconnectable alias).
+    function detectSshFromInput(entry, data) {
+      entry.inbuf += data;
+      let nl;
+      while ((nl = entry.inbuf.search(/[\r\n]/)) >= 0) {
+        const line = entry.inbuf.slice(0, nl);
+        entry.inbuf = entry.inbuf.slice(nl + 1);
+        const m = line.match(/^\s*ssh\s+(?:-\S+\s+|-\S+\s*)*([\w.@-]+(?::\d+)?)\s*$/) || line.match(/^\s*ssh\s+(?:\S+\s+)*?([\w.@-]+)\s*$/);
+        if (m && m[1] && !/^-/.test(m[1])) entry.sshTarget = m[1];
+        // user explicitly leaves the ssh session → tree goes back to the local project (robust; ignores flaky disconnects)
+        if (entry.sshTarget && /^\s*(exit|logout)\s*$/.test(line)) { entry.sshTarget = null; entry.outbuf = ''; exitRemote(); }
+      }
+      // Ctrl-D also ends the shell
+      if (entry.sshTarget && data.includes('\x04')) { entry.sshTarget = null; entry.outbuf = ''; exitRemote(); }
+      if (entry.inbuf.length > 400) entry.inbuf = entry.inbuf.slice(-400);
+    }
+    // Watch output for the remote prompt's cwd → follow that project. The remote-source polls over its own
+    // ssh, independent of this interactive session, so a flaky disconnect doesn't drop the tree.
+    function detectRemoteFromOutput(entry, data) {
+      if (!entry.sshTarget) return;
+      entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-1500);
+      const last = entry.outbuf.split('\n').pop();
+      const p = PROMPT_RE.exec(last || '');
+      if (p && p[3].startsWith('/')) enterRemote(entry.sshTarget, p[3]); // cd'd into a real remote dir → follow it
     }
 
     ws.on('message', (raw) => {
@@ -470,10 +524,18 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       }
       // Terminal pane messages take a dedicated path (the real shell's stdin / resize), everything else goes to the shared handler
       if (msg.type === 'pty_start') { startPty(msg.sessionId, msg.cols, msg.rows); return; }
-      if (msg.type === 'pty_input') { ptys.get(msg.sessionId || 'default')?.pty.write(msg.data); return; }
+      if (msg.type === 'pty_input') {
+        const e = ptys.get(msg.sessionId || 'default');
+        if (e) { e.pty.write(msg.data); detectSshFromInput(e, msg.data); }
+        return;
+      }
       if (msg.type === 'pty_resize') { try { ptys.get(msg.sessionId || 'default')?.pty.resize(msg.cols, msg.rows); } catch {} return; }
-      // Switching tabs: the world-tree follows the cwd of whichever shell is now in front.
-      if (msg.type === 'tab_active') { const e = ptys.get(msg.sessionId || 'default'); if (e) startCwdFollow(e.pty.pid); return; }
+      // Switching tabs: the world-tree follows whichever shell is now in front (local cwd or its ssh session).
+      if (msg.type === 'tab_active') {
+        const e = ptys.get(msg.sessionId || 'default');
+        if (e) { activePtyId = msg.sessionId || 'default'; if (e.sshTarget) { /* its ssh prompt will re-trigger */ } else { exitRemote(); startCwdFollow(e.pty.pid); } }
+        return;
+      }
       if (msg.type === 'pty_close') { const e = ptys.get(msg.sessionId); if (e) { try { e.pty.kill(); } catch {} } return; }
       handleInbound(msg);
     });

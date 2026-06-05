@@ -75,33 +75,42 @@ function sh(host, remoteCmd, { timeoutMs = 20000 } = {}) {
   });
 }
 
-// One round-trip: list code files (path + mtime) and stream their contents, delimited by MARK.
+const LIST_MARK = '@@CT_L@@'; // a file-list line: rel\tmtime (cheap, ALL files → blocks)
+const CONTENT_CAP = 1200;     // read content for at most this many files (imports + previews); bounds the payload on huge repos
+
+// Two stages in one round-trip: (1) list every code file + mtime (cheap → all blocks), (2) stream the
+// content of the first CONTENT_CAP files (for import lines + card previews). Big repos stay fast.
 function buildScanCmd(root) {
   const exprs = CODE_EXT.map((e) => `-name '*.${e}'`).join(' -o ');
   const find = `find . -type f \\( ${exprs} \\) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.venv/*' -not -path '*/__pycache__/*' -not -path '*/dist/*' -not -path '*/build/*' 2>/dev/null | head -${MAX_FILES}`;
-  // emit "MARK<rel>\t<mtime>" then the file body, for each file
-  return `cd ${JSON.stringify(root)} 2>/dev/null && ${find} | while IFS= read -r f; do m=$(stat -c %Y "$f" 2>/dev/null || echo 0); printf '%s%s\\t%s\\n' '${MARK}' "$f" "$m"; cat "$f" 2>/dev/null; done`;
+  return `cd ${JSON.stringify(root)} 2>/dev/null && L=$(${find}) && ` +
+    `printf '%s\\n' "$L" | while IFS= read -r f; do [ -n "$f" ] && printf '%s%s\\t%s\\n' '${LIST_MARK}' "$f" "$(stat -c %Y "$f" 2>/dev/null || echo 0)"; done; ` +
+    `printf '%s\\n' "$L" | head -${CONTENT_CAP} | while IFS= read -r f; do printf '%s%s\\n' '${MARK}' "$f"; cat "$f" 2>/dev/null; done`;
 }
 
 function parseScan(raw) {
-  // split on lines beginning with MARK; each chunk = header line + body
-  const files = [];
+  const byRel = new Map(); // rel → { rel, mtime, content }
   const lines = raw.split('\n');
   let cur = null;
   for (const line of lines) {
-    if (line.startsWith(MARK)) {
-      if (cur) files.push(cur);
-      const head = line.slice(MARK.length);
+    if (line.startsWith(LIST_MARK)) {
+      cur = null;
+      const head = line.slice(LIST_MARK.length);
       const tab = head.lastIndexOf('\t');
       const rel = (tab < 0 ? head : head.slice(0, tab)).replace(/^\.\//, '');
       const mtime = tab < 0 ? 0 : Number(head.slice(tab + 1)) || 0;
-      cur = { rel, mtime, body: [] };
+      if (rel) byRel.set(rel, { rel, mtime, content: '' });
+    } else if (line.startsWith(MARK)) {
+      const rel = line.slice(MARK.length).replace(/^\.\//, '');
+      cur = byRel.get(rel) || { rel, mtime: 0, content: '' };
+      byRel.set(rel, cur);
+      cur.body = [];
     } else if (cur) {
       cur.body.push(line);
     }
   }
-  if (cur) files.push(cur);
-  for (const f of files) f.content = f.body.join('\n');
+  const files = [...byRel.values()];
+  for (const f of files) if (f.body) { f.content = f.body.join('\n'); delete f.body; }
   return files;
 }
 
@@ -141,7 +150,7 @@ export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, 
 
   async function scan() {
     if (stopped) return;
-    const res = await sh(host, buildScanCmd(root));
+    const res = await sh(host, buildScanCmd(root), { timeoutMs: 60000 }); // big repos + slow links need room
     if (!res.ok) { onStatus?.({ ok: false, error: res.err || 'ssh failed', host, root }); return; }
     const files = parseScan(res.out);
     if (!files.length && !firstOk) { onStatus?.({ ok: false, error: 'no code files found (check the path)', host, root }); return; }
