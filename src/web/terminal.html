@@ -51,7 +51,30 @@
     border:1px solid var(--line); border-radius:7px; padding:3px 11px; cursor:pointer;
     transition:border-color .15s, color .15s; }
   #tokbar button:hover { border-color:var(--neon); color:#fff; }
-  #term { flex:1; min-height:0; padding:6px 8px; }
+  /* terminal area = a vertical tab rail on the far left + the terminal panes */
+  #termrow { flex:1; min-height:0; display:flex; }
+  #tabrail { flex:0 0 48px; display:flex; flex-direction:column; gap:7px; padding:9px 0; align-items:center;
+    background:#070b12; border-right:1px solid var(--line); overflow-y:auto; scrollbar-width:none; }
+  #tabrail::-webkit-scrollbar { display:none; }
+  /* each tab is a rounded block; the active one protrudes to the right with a neon edge */
+  #tabrail .tab { position:relative; width:34px; height:34px; flex:0 0 auto; border-radius:9px;
+    border:1px solid var(--line); background:rgba(120,160,220,.07); color:var(--ink);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    font:700 13px/1 "SF Mono",ui-monospace,Menlo,monospace; transition:transform .12s, border-color .12s, color .12s, background .12s; }
+  #tabrail .tab:hover { border-color:#8fd9ff; color:#fff; }
+  #tabrail .tab.active { border-color:var(--neon); color:#04130c; background:var(--neon);
+    transform:translateX(4px); box-shadow:-2px 0 0 var(--neon), 0 0 16px rgba(77,255,176,.4); }
+  #tabrail .tab.dead { opacity:.4; }
+  #tabrail .tab .close { position:absolute; top:-4px; right:-4px; width:14px; height:14px; border-radius:50%;
+    background:#1a2230; border:1px solid var(--line); color:#cfe0ff; font-size:9px; line-height:12px;
+    display:none; align-items:center; justify-content:center; }
+  #tabrail .tab:hover .close { display:flex; }
+  #tabrail .tab.addbtn { color:var(--neon); font-size:20px; background:transparent; border-style:dashed; }
+  #tabrail .tab.addbtn:hover { background:rgba(77,255,176,.1); color:#fff; border-color:var(--neon); }
+  #tabrail .tab.addbtn.active { transform:none; box-shadow:none; }
+  #termwrap { flex:1; min-width:0; position:relative; }
+  #termwrap .pane { position:absolute; inset:0; padding:6px 8px; display:none; }
+  #termwrap .pane.active { display:block; }
   /* The bar below the command line: a visible project switcher, no need to bury it in a system menu */
   #abar { flex:0 0 auto; height:36px; display:flex; align-items:center; gap:10px; padding:0 12px;
     border-top:1px solid var(--line); background:#070b12; font-size:12px; color:var(--ink); z-index:6; }
@@ -126,7 +149,10 @@
         <span id="tkWaste" class="waste" title="Cost of not clearing your cache over the next hour">Waste $0.00</span>
         <button id="tkClear">Clear</button>
       </div>
-      <div id="term"></div>
+      <div id="termrow">
+        <div id="tabrail"><button id="tabAdd" class="tab addbtn" title="New terminal tab">+</button></div>
+        <div id="termwrap"></div>
+      </div>
       <div id="alerts"></div>
       <div id="masl">
         <div class="card">
@@ -160,35 +186,84 @@
   <script>
   const WS_PORT = window.__WS_PORT__ || 7778;
 
-  // ── Real terminal (xterm.js): it owns the display, while the shell runs on the core side via node-pty ──
-  const term = new window.Terminal({
+  // ── Tabbed terminals: several independent shells in one window, switched from the left rail ──
+  // Each tab owns its own xterm + a sessionId; the shell runs on the core side (one node-pty per sessionId).
+  const TERM_OPTS = {
     fontFamily: '"SF Mono",ui-monospace,Menlo,Monaco,monospace',
     fontSize: 13, lineHeight: 1.25, cursorBlink: true,
     theme: { background:'#05080e', foreground:'#eaf1fb', cursor:'#4dffb0',
       black:'#0b0f17', green:'#4dffb0', yellow:'#ffcf4d', red:'#ff6b81',
       blue:'#7fb2ff', cyan:'#86e0ff', white:'#cfe0ff' },
-  });
-  const fit = new window.FitAddon.FitAddon();
-  term.loadAddon(fit);
-  term.open(document.getElementById('term'));
-  fit.fit();
+  };
+  const tabs = [];           // { id, term, fit, pane, btn, started }
+  let activeId = null, seq = 0;
+  const wrap = document.getElementById('termwrap');
+  const rail = document.getElementById('tabrail');
+  const addBtn = document.getElementById('tabAdd');
 
-  let socket = null, started = false;
+  const getTab = (id) => tabs.find(t => t.id === id);
+  const active = () => getTab(activeId);
+  function fitActive(){ const t = active(); if (t) { try { t.fit.fit(); } catch {} } }
+
+  function makeTab(){
+    const id = 't' + (++seq) + Math.random().toString(36).slice(2,5);
+    const pane = document.createElement('div'); pane.className = 'pane'; wrap.appendChild(pane);
+    const term = new window.Terminal(TERM_OPTS);
+    const fit = new window.FitAddon.FitAddon(); term.loadAddon(fit);
+    term.open(pane);
+    term.onData((d) => send({ type:'pty_input', sessionId:id, data:d }));
+    const btn = document.createElement('button'); btn.className = 'tab'; btn.textContent = String(tabs.length + 1);
+    const x = document.createElement('span'); x.className = 'close'; x.textContent = '✕';
+    x.onclick = (e) => { e.stopPropagation(); closeTab(id); };
+    btn.appendChild(x);
+    btn.onclick = () => switchTab(id);
+    rail.insertBefore(btn, addBtn);
+    const t = { id, term, fit, pane, btn, started:false };
+    tabs.push(t);
+    if (socket && socket.readyState === 1) startTab(t);
+    switchTab(id);
+    return t;
+  }
+  function startTab(t){
+    if (t.started) return;
+    fitActive();
+    send({ type:'pty_start', sessionId:t.id, cols:t.term.cols||80, rows:t.term.rows||24 });
+    t.started = true;
+  }
+  function switchTab(id){
+    activeId = id;
+    for (const t of tabs){ const on = t.id===id; t.pane.classList.toggle('active', on); t.btn.classList.toggle('active', on); }
+    const t = active(); if (t){ try { t.fit.fit(); } catch {} t.term.focus();
+      send({ type:'pty_resize', sessionId:id, cols:t.term.cols, rows:t.term.rows });
+      send({ type:'tab_active', sessionId:id }); }   // the world-tree follows this tab's cwd
+  }
+  function closeTab(id){
+    const i = tabs.findIndex(t => t.id===id); if (i<0) return;
+    const t = tabs[i];
+    send({ type:'pty_close', sessionId:id });
+    try { t.term.dispose(); } catch {} t.pane.remove(); t.btn.remove();
+    tabs.splice(i,1);
+    tabs.forEach((tt, k) => { tt.btn.firstChild ? tt.btn.childNodes[0].nodeValue = String(k+1) : null; });
+    if (tabs.length === 0) { makeTab(); return; }
+    switchTab(tabs[Math.max(0,i-1)].id);
+  }
+  addBtn.onclick = () => makeTab();
+
+  let socket = null;
   function send(o){ if(socket && socket.readyState===1) socket.send(JSON.stringify(o)); }
 
   function connect(){
     const ws = new WebSocket(`ws://localhost:${WS_PORT}`);
     socket = ws;
     ws.onopen = () => {
-      fit.fit();
-      send({ type:'pty_start', cols: term.cols, rows: term.rows });
-      started = true;
+      if (tabs.length === 0) makeTab();              // first connect → open tab 1
+      else { tabs.forEach(t => { t.started = false; startTab(t); }); } // reconnect → re-open each tab's shell
     };
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
-      if (m.type === 'pty_output') term.write(m.data);
+      if (m.type === 'pty_output') { getTab(m.sessionId)?.term.write(m.data); }
       else if (m.type === 'pty_missing') document.getElementById('need').classList.add('show');
-      else if (m.type === 'pty_exit') { term.write('\r\n\x1b[90m[shell exited]\x1b[0m\r\n'); setRec(null); }
+      else if (m.type === 'pty_exit') { const t=getTab(m.sessionId); if(t){ t.term.write('\r\n\x1b[90m[shell exited]\x1b[0m\r\n'); t.btn.classList.add('dead'); } if(m.sessionId===activeId) setRec(null); }
       else if (m.type === 'session_log' && m.payload) {
         // Once the CLI is open it records the full transcript; light up REC and put the save path in the tooltip
         setRec(m.payload.file);
@@ -231,17 +306,15 @@
       }
       // Visualization messages like state / active are handled by the right iframe's own connection; this one only handles the terminal
     };
-    ws.onclose = () => { started = false; setTimeout(connect, 1500); };
+    ws.onclose = () => { tabs.forEach(t => t.started = false); setTimeout(connect, 1500); };
   }
   connect();
 
-  // Keyboard → shell
-  term.onData((d) => send({ type:'pty_input', data:d }));
-
-  // Window / divider changes → re-fit and tell the shell the new size
+  // Window / divider changes → re-fit the active terminal and tell its shell the new size
   function relayout(){
-    fit.fit();
-    if (started) send({ type:'pty_resize', cols: term.cols, rows: term.rows });
+    const t = active(); if (!t) return;
+    try { t.fit.fit(); } catch {}
+    if (t.started) send({ type:'pty_resize', sessionId:t.id, cols:t.term.cols, rows:t.term.rows });
   }
   addEventListener('resize', relayout);
 
@@ -257,19 +330,18 @@
       const total = split.clientWidth, x = Math.max(280, Math.min(e.clientX, total-260));
       const lp = (x/total*100);
       left.style.flex = `0 0 ${lp}%`; right.style.flex = `1 1 ${100-lp}%`;
-      fit.fit();
+      fitActive();
     });
   })();
 
-  // Clicking the terminal area grabs focus back to the terminal
-  document.getElementById('term').addEventListener('mousedown', () => term.focus());
-  term.focus();
+  // Clicking the terminal area grabs focus back to the active terminal
+  document.getElementById('termwrap').addEventListener('mousedown', () => active()?.term.focus());
 
   // Token bar "Clear": tell core to set the current totals as the new baseline, zero the display, and return focus to the terminal
   (function tokenClear(){
     const btn = document.getElementById('tkClear');
     if (!btn) return;
-    btn.onclick = () => { send({ type:'tokens_clear' }); term.focus(); };
+    btn.onclick = () => { send({ type:'tokens_clear' }); active()?.term.focus(); };
   })();
 
   // ── MASL pre-action gate: block and wait for you to hit Allow / Block ──
@@ -301,7 +373,7 @@
     if (gateId) send({ type:'gate_reply', id: gateId, approve });
     gateId = null;
     document.getElementById('masl').classList.remove('show');
-    term.focus();
+    active()?.term.focus();
   }
   document.getElementById('maslDeny').onclick = () => closeGate(false);
   document.getElementById('maslAllow').onclick = () => closeGate(true);

@@ -420,11 +420,12 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     clients.add(ws);
     ws.send(JSON.stringify({ type: 'state', payload: currentSnapshot() }));
     ws.send(JSON.stringify({ type: 'tokens', payload: tokensSnapshot() }));
-    let pty = null; // this connection's own shell (opened only when the terminal pane requests it)
-    let slog = null; // this connection's session transcript (opened only once the pty is up)
+    // One connection can hold several independent shells (tabs). Each is keyed by a sessionId from the page.
+    const ptys = new Map(); // sessionId → { pty, slog }
 
-    async function startPty(cols, rows) {
-      if (pty) return;
+    async function startPty(sessionId, cols, rows) {
+      sessionId = sessionId || 'default';
+      if (ptys.has(sessionId)) return;
       const mod = await getPty();
       if (!mod) { // node-pty not installed: report honestly, don't pretend there's a terminal
         ws.send(JSON.stringify({ type: 'pty_missing' }));
@@ -435,29 +436,29 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       // and the like), so claude and brew-installed tools give "command not found" and seem unresponsive. Open with a login shell (-l)
       // so it sources the user's .zprofile / .zshrc and restores the full PATH. VS Code and Hyper do the same.
       const loginArgs = /\/(zsh|bash|sh|fish)$/.test(shell) ? ['-l'] : [];
-      pty = mod.spawn(shell, loginArgs, {
+      const pty = mod.spawn(shell, loginArgs, {
         name: 'xterm-color',
         cols: cols || 80, rows: rows || 24,
         cwd: shellCwd, env: process.env,
       });
-      // Start the transcript as soon as the CLI opens, writing all of this shell's visible output to a txt file (for future memory training).
-      slog = createSessionLogger({ root, label: projLabel });
+      // Each tab records its own transcript.
+      const slog = createSessionLogger({ root, label: projLabel });
+      const entry = { pty, slog };
+      ptys.set(sessionId, entry);
       if (slog.ok) {
         sessionLogs.add(slog);
-        ws.send(JSON.stringify({ type: 'session_log', payload: { file: slog.file } }));
-        log('session transcript ->', slog.file);
+        ws.send(JSON.stringify({ type: 'session_log', sessionId, payload: { file: slog.file } }));
       }
       pty.onData((d) => {
         if (slog) slog.stream('term', d);
-        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pty_output', data: d }));
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pty_output', sessionId, data: d }));
       });
       pty.onExit(() => {
-        ws.send(JSON.stringify({ type: 'pty_exit' }));
-        stopCwdFollow();
-        if (slog) { sessionLogs.delete(slog); slog.close('shell exited'); slog = null; }
-        pty = null;
+        ws.send(JSON.stringify({ type: 'pty_exit', sessionId }));
+        if (slog) { sessionLogs.delete(slog); slog.close('shell exited'); }
+        ptys.delete(sessionId);
       });
-      startCwdFollow(pty.pid); // once the terminal is open, watch its cwd; cd'ing into a project auto-switches the root on the right
+      startCwdFollow(pty.pid); // the newly-opened (active) tab drives the world-tree's cwd-follow
     }
 
     ws.on('message', (raw) => {
@@ -468,15 +469,21 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         return;
       }
       // Terminal pane messages take a dedicated path (the real shell's stdin / resize), everything else goes to the shared handler
-      if (msg.type === 'pty_start') { startPty(msg.cols, msg.rows); return; }
-      if (msg.type === 'pty_input') { if (pty) pty.write(msg.data); return; }
-      if (msg.type === 'pty_resize') { if (pty) try { pty.resize(msg.cols, msg.rows); } catch {} return; }
+      if (msg.type === 'pty_start') { startPty(msg.sessionId, msg.cols, msg.rows); return; }
+      if (msg.type === 'pty_input') { ptys.get(msg.sessionId || 'default')?.pty.write(msg.data); return; }
+      if (msg.type === 'pty_resize') { try { ptys.get(msg.sessionId || 'default')?.pty.resize(msg.cols, msg.rows); } catch {} return; }
+      // Switching tabs: the world-tree follows the cwd of whichever shell is now in front.
+      if (msg.type === 'tab_active') { const e = ptys.get(msg.sessionId || 'default'); if (e) startCwdFollow(e.pty.pid); return; }
+      if (msg.type === 'pty_close') { const e = ptys.get(msg.sessionId); if (e) { try { e.pty.kill(); } catch {} } return; }
       handleInbound(msg);
     });
     ws.on('close', () => {
       clients.delete(ws);
-      if (pty) { try { pty.kill(); } catch {} pty = null; }
-      if (slog) { sessionLogs.delete(slog); slog.close('disconnected'); slog = null; }
+      for (const { pty, slog } of ptys.values()) {
+        try { pty.kill(); } catch {}
+        if (slog) { sessionLogs.delete(slog); slog.close('disconnected'); }
+      }
+      ptys.clear();
     });
   });
 
