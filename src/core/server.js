@@ -13,6 +13,7 @@ import { WS_PORT, WEB_PORT, isIgnored, ANOMALY } from '../config.js';
 import { Graph } from './state.js';
 import { parseImports } from './parser.js';
 import { createRemoteSource } from './remote-source.js';
+import { traceProject } from './agent-trace.js';
 import { createRunner } from './runner.js';
 import { createSdkAgent } from '../cli/sdk-agent.js';
 import { createRoutedAgent } from '../cli/routed-agent.js';
@@ -572,32 +573,24 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       if (entry.sshTarget && data.includes('\x04')) { entry.sshTarget = null; entry.outbuf = ''; exitRemote(); }
       if (entry.inbuf.length > 400) entry.inbuf = entry.inbuf.slice(-400);
     }
-    // An agent (e.g. claude) running in the terminal does its own ssh internally — we never see a shell prompt,
-    // but it usually prints the target like `sportverse:/opt/vidgen` or `root@1.2.3.4:/opt/vidgen`. Follow that.
-    // Only honour a host that's a real ssh alias (from ~/.ssh/config) or a user@host form, so we don't chase
-    // random `word:/path` strings. URLs (http://…:port/) don't match because the host can't start with a digit.
-    const MENTION_RE = /(?:^|[\s"'`([])((?:[a-z_][\w.-]{0,30}@)?[a-z_][\w.-]{1,40}):(\/(?:opt|home|srv|root|var|app|Users|workspace|data|projects)[\w./-]*)/gi;
-    // The reliable signal for an agent (claude/codex) working remotely: it prints its own command, e.g.
-    //   Bash(ssh sportverse "cd /opt/vidgen && ...")
-    // Capture the host and the cd'd path from that. Works for both quote styles and optional ssh flags.
-    const SSH_CMD_RE = /\bssh\s+(?:-\S+\s+)*([a-z_][\w.@-]+)\s+["'][^"']*?\bcd\s+(\/[\w./-]+)/gi;
+    // Figure out WHICH project the terminal is working in from whatever it prints — covers an in-terminal agent
+    // (claude/codex) doing its own ssh/edits, plain shells, scp/rsync, host:/path mentions, cd, git -C, etc.
+    // All the messy format-matching lives in agent-trace.js (unit-tested against dozens of real shapes).
     function detectRemoteFromOutput(entry, data) {
-      entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-3000);
-      // (a) you ssh'd in OUR shell → follow the remote prompt's cwd
+      entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-4000);
+      // (a) precise: you ssh'd in OUR shell → follow the remote prompt's cwd
       if (entry.sshTarget) {
         const last = entry.outbuf.split('\n').pop();
         const p = PROMPT_RE.exec(last || '');
         if (p && p[3].startsWith('/')) { enterRemote(entry.sshTarget, p[3]); return; }
       }
-      let best = null, m;
-      // (b) an agent ran `ssh <host> "cd <path> && ..."` — the most reliable remote signal
-      SSH_CMD_RE.lastIndex = 0;
-      while ((m = SSH_CMD_RE.exec(entry.outbuf)) !== null) {
-        if (m[1].includes('@') || SSH_ALIASES.has(m[1])) best = { host: m[1], root: m[2] };
+      // (b) inferred: read every signal in the recent output and follow the project it points at
+      const tr = traceProject(entry.outbuf, { sshAliases: SSH_ALIASES });
+      if (tr.host && tr.root) { enterRemote(tr.host, tr.root); return; }
+      // (c) local project the agent is editing (e.g. claude Edit(/abs/path)) that our shell never cd'd into
+      if (!remote && !tr.host && tr.root && tr.root !== os.homedir() && tr.root !== '/') {
+        try { if (fs.existsSync(tr.root) && fs.statSync(tr.root).isDirectory() && path.resolve(tr.root) !== root) reroot(tr.root); } catch {}
       }
-      // (c) fallback: a bare `host:/path` mention
-      if (!best) { MENTION_RE.lastIndex = 0; while ((m = MENTION_RE.exec(entry.outbuf)) !== null) { if (m[1].includes('@') || SSH_ALIASES.has(m[1])) best = { host: m[1], root: m[2] }; } }
-      if (best) enterRemote(best.host, best.root);
     }
 
     ws.on('message', (raw) => {
