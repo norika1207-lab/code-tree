@@ -42,6 +42,19 @@ export async function detectLocalLLM({ preferModel } = {}) {
     };
   }
 
+  // 0.5) Bragi-LLM proxy on :8080 (preferred when available).
+  // Bragi is the on-device coder we ship with Code Tree. Its /v1/health returns { model: 'bragi-llm', upstream: 'up' }.
+  // If Bragi is running, prefer it: smaller (805 MB), MBPP 92%, zero subscription.
+  const bragiHealth = await getJson('http://localhost:8080/v1/health', 1500);
+  if (bragiHealth && bragiHealth.model === 'bragi-llm' && bragiHealth.upstream === 'up') {
+    return {
+      baseURL: 'http://localhost:8080/v1',
+      model: 'bragi-llm',
+      provider: 'bragi',
+      models: ['bragi-llm'],
+    };
+  }
+
   // 1) Ollama (the main path; timeout relaxed to 3s: at 1.2s a busy machine occasionally misses, making us wrongly conclude there's no local fallback)
   const tags = await getJson('http://localhost:11434/api/tags', 3000);
   if (tags && Array.isArray(tags.models)) {
@@ -54,8 +67,8 @@ export async function detectLocalLLM({ preferModel } = {}) {
     };
   }
 
-  // 2) generic OpenAI-compatible server (vLLM / llama.cpp / LM Studio)
-  for (const base of ['http://localhost:8000/v1', 'http://localhost:1234/v1']) {
+  // 2) generic OpenAI-compatible server (vLLM / llama.cpp / LM Studio / Bragi without health check)
+  for (const base of ['http://localhost:8080/v1', 'http://localhost:8000/v1', 'http://localhost:1234/v1']) {
     const models = await getJson(base + '/models');
     const data = models && models.data;
     if (Array.isArray(data) && data.length) {
