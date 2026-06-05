@@ -70,7 +70,7 @@ Then just run Code Tree. If you are not logged into Claude Code, it auto-detects
 code-tree --local <path-to-your-project>
 ```
 
-It probes, in order: the env vars `CODETREE_LOCAL_URL` / `CODETREE_LOCAL_MODEL` if set, then Ollama on `:11434`, then a generic OpenAI-compatible server on `:8000` or `:1234`. Point it at a beefier box on your network with:
+It probes, in order: the env vars `CODETREE_LOCAL_URL` / `CODETREE_LOCAL_MODEL` if set, then [Bragi-LLM](https://github.com/norika1207-lab/Bragi-LLM) on `:8080` (the 805 MB local coder we ship for Code Tree, MBPP 92%, see the triptych section below), then Ollama on `:11434`, then a generic OpenAI-compatible server on `:8000` or `:1234`. Point it at a beefier box on your network with:
 
 ```
 CODETREE_LOCAL_URL=http://192.168.1.50:11434/v1 CODETREE_LOCAL_MODEL=qwen2.5-coder code-tree --local .
@@ -135,6 +135,18 @@ Browser viz :7790 ─┘
 ```
 
 Fully local. No server dependency, nothing leaves your machine.
+
+## The triptych
+
+Code Tree is one of three repos that together form an offline, zero-subscription on-device coding stack (~1 GB total):
+
+| Role | Repo | What it is |
+|---|---|---|
+| Brain | [Bragi-LLM](https://github.com/norika1207-lab/Bragi-LLM) | The 805 MB coder: backbone + symbolic engine + intercept router. MBPP 92%. |
+| Eyes (this repo) | [Code Tree](https://github.com/norika1207-lab/code-tree) | The visual IDE: terminal on the left, live world-tree of the codebase on the right. |
+| Hands | [Demeter-CodeBuilder](https://github.com/norika1207-lab/Demeter-CodeBuilder) | The glue: OpenAI-compatible proxy wiring Bragi as Code Tree's default local backend on `:8080`. |
+
+Paper (Bragi method, ablations): [doi:10.5281/zenodo.20557449](https://doi.org/10.5281/zenodo.20557449)
 
 ## License
 
