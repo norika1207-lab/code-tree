@@ -7,6 +7,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { WS_PORT, WEB_PORT, isIgnored, ANOMALY } from '../config.js';
 import { Graph } from './state.js';
@@ -342,9 +343,19 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       });
     });
   }
+  // A directory is worth growing a tree for if it has a project marker OR simply contains code (directly or in src/).
+  // The old version only accepted .git/package.json, so cd'ing into a plain Python folder, a sample, or a subdir
+  // never switched the tree — the right side stayed blank. This is why "I cd into my project and nothing appears".
+  const CODE_RE = /\.(js|jsx|mjs|cjs|ts|tsx|py|go|rb|rs|java|php|c|h|cpp|hpp|swift|kt|scala|sh)$/;
+  function hasCodeFile(dir) {
+    try { return fs.readdirSync(dir).some((f) => CODE_RE.test(f)); } catch { return false; }
+  }
   function looksLikeProject(dir) {
-    try { return fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'package.json')); }
-    catch { return false; }
+    try {
+      const markers = ['.git', 'package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'requirements.txt', 'tsconfig.json', 'pom.xml', 'Gemfile', 'composer.json', 'setup.py'];
+      for (const m of markers) if (fs.existsSync(path.join(dir, m))) return true;
+      return hasCodeFile(dir) || hasCodeFile(path.join(dir, 'src'));
+    } catch { return false; }
   }
   function startCwdFollow(pid) {
     if (cwdTimer) return;
@@ -354,7 +365,9 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       const cwd = await shellCwdOf(followPid);
       if (!cwd || cwd === lastCwd) return;
       lastCwd = cwd;
-      if (looksLikeProject(cwd) && path.resolve(cwd) !== root) reroot(cwd);
+      // Don't reroot to the home directory itself — it's not a project and scanning all of $HOME is slow/noisy.
+      const resolved = path.resolve(cwd);
+      if (resolved !== os.homedir() && looksLikeProject(cwd) && resolved !== root) reroot(cwd);
     }, 1500);
   }
   function stopCwdFollow() { if (cwdTimer) clearInterval(cwdTimer); cwdTimer = null; followPid = null; }

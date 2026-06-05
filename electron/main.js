@@ -194,11 +194,12 @@ app.whenReady().then(async () => {
   let root = envRoot && fs.existsSync(envRoot) ? envRoot
     : (prefs.lastProject && fs.existsSync(prefs.lastProject) ? prefs.lastProject : null);
   if (root) { openProjectFlow(root); return; }
-  // No usable project: pop the picker. Only fall back to no-project if the user cancels (their own choice, not the default).
-  logln('no env/lastProject, prompting picker');
-  const picked = await pickProject();
-  if (picked) openProjectFlow(picked);
-  else openNoProject();
+  // First run / no remembered project: do NOT wall the user behind a native picker (that's a button, and it kept
+  // dropping people into the empty no-project scratch → a permanently blank tree). Open straight into follow mode:
+  // the terminal is live in your home dir, and the moment you cd into any project the tree grows there by itself.
+  // The picker still exists under the Project menu (Cmd+O) for anyone who wants to point at a folder directly.
+  logln('no env/lastProject, opening in follow mode (no picker wall)');
+  openNoProject();
 });
 
 app.on('activate', () => { if (!win) createWindow(); });
