@@ -141,17 +141,21 @@
   #agentlog .u { color:#86e0ff; margin:7px 0 3px; font-weight:600; }
   #agentlog .t { color:#9fb4d6; white-space:pre-wrap; }
   #agentlog .tool { color:var(--neon); }
+  #agentlog .done { color:#6fe0a0; margin-top:4px; }
   #agentlog .err { color:#ff6b81; }
-  #ask { flex:0 0 auto; display:flex; gap:8px; align-items:flex-end; padding:8px 10px;
-    border-top:1px solid rgba(120,160,220,.18); background:#0a0f17; }
-  #ask textarea { flex:1; resize:none; max-height:120px; min-height:20px; background:#10151f; color:#eaf1fb;
-    border:1px solid rgba(120,160,220,.28); border-radius:9px; padding:8px 11px; line-height:1.4;
-    font:13px/1.4 ui-sans-serif,-apple-system,system-ui; outline:none; }
-  #ask textarea:focus { border-color:var(--neon); }
+  /* Composer: one rounded field with a small send glyph inside the right edge, like a chat box. */
+  #ask { flex:0 0 auto; position:relative; padding:8px 10px;
+    border-top:1px solid rgba(120,160,220,.14); background:#0a0f17; }
+  #ask textarea { width:100%; box-sizing:border-box; resize:none; max-height:120px; min-height:20px;
+    background:#10151f; color:#eaf1fb; border:1px solid rgba(120,160,220,.22); border-radius:11px;
+    padding:9px 40px 9px 13px; line-height:1.4; font:13px/1.4 ui-sans-serif,-apple-system,system-ui; outline:none; }
+  #ask textarea:focus { border-color:rgba(77,255,176,.55); }
   #ask textarea::placeholder { color:#5d6f88; }
-  #ask button { flex:0 0 auto; background:var(--neon); color:#04130c; border:0; border-radius:9px;
-    padding:9px 16px; font-weight:700; cursor:pointer; font:inherit; }
-  #ask button:disabled { opacity:.45; cursor:default; }
+  #ask button { position:absolute; right:18px; bottom:15px; width:22px; height:22px; padding:0;
+    display:flex; align-items:center; justify-content:center; border:0; border-radius:6px; cursor:pointer;
+    background:rgba(77,255,176,.16); color:var(--neon); font-size:13px; line-height:1; transition:background .15s; }
+  #ask button:hover { background:rgba(77,255,176,.28); }
+  #ask button:disabled { opacity:.4; cursor:default; }
 </style>
 </head>
 <body>
@@ -173,8 +177,8 @@
       </div>
       <div id="agentlog"></div>
       <div id="ask">
-        <textarea id="askInput" rows="1" placeholder="Ask Bragi to write code…  (Enter to run)"></textarea>
-        <button id="askSend">Run ▸</button>
+        <textarea id="askInput" rows="1" placeholder="Ask Bragi to write code…"></textarea>
+        <button id="askSend" title="Send (Enter)">↵</button>
       </div>
       <div id="alerts"></div>
       <div id="masl">
@@ -257,7 +261,7 @@
     try {
       const r = (t.term.rows || 24) - 2; if (r > 0) t.term.write('\n'.repeat(r));
       // One-line, discoverable hint so the user always knows how to start coding with the bundled local model.
-      t.term.write('\x1b[90m  Bragi local model is on. Code with it here →  \x1b[1;36mcosmos-tree --local .\x1b[0m\r\n');
+      t.term.write('\x1b[90m  Bragi local model is on. Type a request in the box below, or run  \x1b[1;36mbragi\x1b[0;90m  here.\x1b[0m\r\n');
     } catch {}
     send({ type:'pty_start', sessionId:t.id, cols:t.term.cols||80, rows:t.term.rows||24 });
     t.started = true;
@@ -339,32 +343,42 @@
     const input = document.getElementById('askInput');
     const btn = document.getElementById('askSend');
     const logEl = document.getElementById('agentlog');
-    let busy = false;
+    let busy = false, buf = '', toolCount = 0;
     function append(cls, text){
       logEl.classList.add('on');
-      const last = logEl.lastChild;
-      if (cls === 't' && last && last.classList && last.classList.contains('t')) { last.textContent += text; }
-      else { const d = document.createElement('div'); d.className = cls; d.textContent = text; logEl.appendChild(d); }
+      const d = document.createElement('div'); d.className = cls; d.textContent = text; logEl.appendChild(d);
       logEl.scrollTop = logEl.scrollHeight;
     }
-    function setBusy(b){ busy = b; btn.disabled = b; btn.textContent = b ? 'Working…' : 'Run ▸'; }
+    function setBusy(b){ busy = b; btn.disabled = b; btn.textContent = b ? '⋯' : '↵'; }
     function run(){
       const text = input.value.trim();
-      if (!text || busy) return;
-      if (!socket || socket.readyState !== 1) { append('err', '⚠ not connected yet, try again in a second'); return; }
+      if (!text) return;
+      if (busy) { append('err', '⚠ 還在跑上一個,等右下 Run 變回來再送'); return; }   // don't silently swallow
+      if (!socket || socket.readyState !== 1) { append('err', '⚠ 還沒連上,等一秒再送'); return; }
+      buf = ''; toolCount = 0;
       setBusy(true);
       append('u', '▸ ' + text);
       send({ type:'run', text });
-      input.value = ''; input.style.height = 'auto';
+      input.value = ''; input.style.height = 'auto'; input.focus();   // always clear after dispatch
     }
     btn.onclick = run;
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
+    // Clean transcript: collect the model's raw text quietly, show only the files it touched + a done line.
     window.__agent = {
-      text: (d) => append('t', d),
-      tool: (name, path) => append('tool', '● ' + name + (path ? '  ' + String(path).split('/').pop() : '')),
+      text: (d) => { buf += d; },
+      tool: (name, path) => { toolCount++; append('tool', '● ' + name + (path ? '  ' + String(path).split('/').pop() : '')); },
       error: (msg) => { append('err', '⚠ ' + msg); setBusy(false); },
-      end: () => { setBusy(false); },
+      end: () => {
+        if (toolCount === 0 && buf.trim()) {
+          // a conversational answer (no file written): show it cleaned of code fences / json noise
+          const clean = buf.replace(/```[\s\S]*?```/g, '').replace(/\n{2,}/g, '\n').trim().slice(0, 500);
+          if (clean) append('t', clean);
+        } else {
+          append('done', '✓ 完成' + (toolCount ? ' · 改了 ' + toolCount + ' 個檔' : ''));
+        }
+        setBusy(false);
+      },
     };
   })();
 
