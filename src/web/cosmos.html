@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Cosmos Tree</title>
 <style>
-  :root { --neon:#4dffb0; --amber:#ffcf4d; --red:#ff6b81; --ink:#9fb0c6; }
+  :root { --neon:#5cc8ff; --amber:#e9b86b; --red:#ff6b81; --ink:#8c9bb5; }
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { width:100%; height:100%; overflow:hidden; }
   body { font-family:-apple-system,"PingFang TC","Helvetica Neue",system-ui,sans-serif; color:#eaf1fb; background:#060a12; }
@@ -14,7 +14,7 @@
   #sky { position:fixed; inset:0; z-index:0;
     background:
       radial-gradient(1100px 760px at 70% 12%, #122138 0%, rgba(18,33,56,0) 60%),
-      radial-gradient(900px 700px at 20% 95%, #0d1f1a 0%, rgba(13,31,26,0) 55%),
+      radial-gradient(900px 700px at 20% 95%, #0d1a2a 0%, rgba(13,31,26,0) 55%),
       linear-gradient(180deg, #070c16 0%, #060a12 60%, #04070d 100%); }
   #stars { position:fixed; inset:0; z-index:0; opacity:.5; }
   svg#tree { position:fixed; inset:0; z-index:1; display:block; cursor:grab; width:100%; height:100%; }
@@ -30,7 +30,7 @@
   #hud .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--neon); box-shadow:0 0 14px var(--neon); animation:beat 1.6s ease-in-out infinite; }
   @keyframes beat { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.65)} }
   #hud .label { margin-top:13px; font-size:11px; letter-spacing:1px; color:var(--ink); opacity:.6; }
-  #hud .file { margin-top:4px; font-size:19px; font-weight:650; color:#fff; word-break:break-all; text-shadow:0 0 20px rgba(77,255,176,.35); }
+  #hud .file { margin-top:4px; font-size:19px; font-weight:650; color:#fff; word-break:break-all; text-shadow:0 0 12px rgba(92,200,255,.25); }
   #hud .file.idle { color:#6b7689; text-shadow:none; }
   #hud .meta { margin-top:8px; font-size:12px; color:var(--ink); opacity:.8; }
   #hud .meta b { color:#fff; }
@@ -44,10 +44,10 @@
   #conn.on .dot { background:var(--neon); box-shadow:0 0 10px var(--neon); }
 
   /* Leaf labels */
-  .nlabel { font-size:11px; fill:#d4e4d8; paint-order:stroke; stroke:#060a12; stroke-width:3px; stroke-linejoin:round; pointer-events:none; }
+  .nlabel { font-size:11px; fill:#cfe0ff; paint-order:stroke; stroke:#060a12; stroke-width:3px; stroke-linejoin:round; pointer-events:none; }
   .nlabel.active { fill:#fff; font-weight:700; font-size:12.5px; }
-  .dlabel { font-size:10px; fill:#9a8a6f; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; pointer-events:none; }
-  .rootlabel { font-size:13px; font-weight:700; fill:#e7c79a; letter-spacing:1px; paint-order:stroke; stroke:#060a12; stroke-width:3px; pointer-events:none; }
+  .dlabel { font-size:10px; fill:#7d8ca8; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; pointer-events:none; }
+  .rootlabel { font-size:13px; font-weight:700; fill:#6b7d99; letter-spacing:1px; paint-order:stroke; stroke:#060a12; stroke-width:3px; pointer-events:none; }
   /* Collapsed file: a small glowing leaf dot; click it to expand into a card */
   .dotc { cursor:pointer; }
   .dotlabel { font-size:10px; fill:#9fb4d6; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; pointer-events:none; }
@@ -71,7 +71,7 @@
     padding:1px 6px; border-radius:5px; white-space:nowrap; }
   .fcard .bd { flex:1; overflow:hidden; padding:7px 10px; margin:0;
     font:9px/1.44 "SF Mono",ui-monospace,Menlo,monospace; color:#93a9c8; white-space:pre; }
-  .fcard.active { border-color:var(--neon); box-shadow:0 0 0 2px var(--neon),0 0 36px rgba(77,255,176,.45); }
+  .fcard.active { border-color:var(--neon); box-shadow:0 0 0 2px var(--neon),0 0 16px rgba(92,200,255,.32); }
   .fcard.active .badge { background:var(--neon); color:#04130c; }
   .fcard.modified { border-color:var(--amber); }
   .fcard.modified .badge { background:var(--amber); color:#241a02; }
@@ -82,13 +82,13 @@
   /* Being written into right now: the tile pulses neon while code visibly streams into it line by line */
   .fcard.writing { border-color:var(--neon); }
   .fcard.writing { animation:writepulse .7s ease-in-out infinite; }
-  @keyframes writepulse { 0%,100%{box-shadow:0 0 0 2px var(--neon),0 0 26px rgba(77,255,176,.5)} 50%{box-shadow:0 0 0 2px var(--neon),0 0 48px rgba(77,255,176,.95)} }
+  @keyframes writepulse { 0%,100%{box-shadow:0 0 0 2px var(--neon),0 0 12px rgba(92,200,255,.4)} 50%{box-shadow:0 0 0 2px var(--neon),0 0 22px rgba(92,200,255,.7)} }
   .fcard.writing .bd::after { content:'▏'; color:var(--neon); font-weight:700; animation:caret .6s steps(1) infinite; }
   @keyframes caret { 0%,100%{opacity:1} 50%{opacity:0} }
   /* Birth order: which file was built first, which came later */
   .fcard .hd .seq { flex:0 0 auto; font-size:10px; font-weight:800; color:#9fb4d6;
     background:rgba(120,160,220,.16); border-radius:5px; padding:1px 6px; letter-spacing:.3px; }
-  .fcard.first .hd .seq { background:#d8a24a; color:#1a1205; box-shadow:0 0 12px rgba(216,162,74,.8); }
+  .fcard.first .hd .seq { background:#46587a; color:#dce8fb; box-shadow:none; }
   /* Blast radius: hover a tile to mark who gets hit if you change it */
   .fcard.epicenter { border-color:#5fd0ff !important; box-shadow:0 0 0 2px #5fd0ff,0 0 30px rgba(95,208,255,.55) !important; }
   .fcard.atrisk { border-color:#ff9d4d !important; box-shadow:0 0 0 2px rgba(255,157,77,.85),0 0 22px rgba(255,157,77,.4) !important; }
@@ -121,7 +121,7 @@
   /* Change ledger (top-right): the temporal "what did the agent change" list */
   /* cross-session recall toast: the agent is standing on a past fix in this project */
   #recall { left:50%; top:18px; transform:translateX(-50%) translateY(-12px); padding:9px 16px; font-size:12.5px;
-    color:#04130c; background:var(--neon); border:0; box-shadow:0 8px 28px rgba(77,255,176,.35);
+    color:#04130c; background:var(--neon); border:0; box-shadow:0 8px 28px rgba(92,200,255,.35);
     opacity:0; pointer-events:none; transition:opacity .35s, transform .35s; font-weight:600; }
   #recall.on { opacity:1; transform:translateX(-50%) translateY(0); }
   #ledger { right:22px; top:64px; width:264px; max-height:44vh; padding:0; display:none; flex-direction:column; overflow:hidden; }
@@ -198,10 +198,10 @@
   </div>
 
   <div id="legend" class="panel">
-    <div class="row"><span class="sw" style="background:#4dffb0;box-shadow:0 0 8px #4dffb0"></span> Active now</div>
+    <div class="row"><span class="sw" style="background:#5cc8ff;box-shadow:0 0 8px #5cc8ff"></span> Active now</div>
     <div class="row"><span class="sw" style="background:#ffcf4d"></span> Modified</div>
     <div class="row"><span class="sw" style="background:#ff6b81"></span> Repeated edits · anomaly</div>
-    <div class="row"><span class="sw" style="background:#86b8a0"></span> Untouched</div>
+    <div class="row"><span class="sw" style="background:#7d8ca8"></span> Untouched</div>
   </div>
 
   <div id="conn" class="panel"><span class="dot"></span><span id="connText">Connecting…</span></div>
@@ -238,7 +238,7 @@
   <script>
   const WS_PORT = window.__WS_PORT__ || 7778;
   // Use a glowing sage green for idle so untouched files look like leaves, not black dots
-  const COLOR = { idle:'#86b8a0', active:'#4dffb0', modified:'#ffcf4d', error:'#ff6b81' };
+  const COLOR = { idle:'#7d8ca8', active:'#5cc8ff', modified:'#ffcf4d', error:'#ff6b81' };
   let projectName = 'Project';
 
   // ── Starfield background ──
@@ -413,19 +413,18 @@
     // ── Origin (seed) → trunk → central spine (threading up through every tier) ──
     // Trunk: a short run from the origin up to the bottom tier, with no dangling tail
     gTrunk.selectAll('path.trunk').data([0]).join(en=>en.append('path').attr('class','trunk'),u=>u,x=>x.remove())
-      .attr('d',`M0,${yGround} L0,${maxY}`).attr('fill','none').attr('stroke','#6b4423')
-      .attr('stroke-width',26).attr('stroke-linecap','round').attr('stroke-opacity',.97);
+      .attr('d',`M0,${yGround} L0,${maxY}`).attr('fill','none').attr('stroke','#33415c')
+      .attr('stroke-width',3).attr('stroke-linecap','round').attr('stroke-opacity',.9);
     gTrunk.selectAll('path.spine').data([0]).join(en=>en.append('path').attr('class','spine'),u=>u,x=>x.remove())
-      .attr('d',`M0,${maxY} L0,${topY}`).attr('fill','none').attr('stroke','#6b4423')
-      .attr('stroke-width',11).attr('stroke-linecap','round').attr('stroke-opacity',.82);
+      .attr('d',`M0,${maxY} L0,${topY}`).attr('fill','none').attr('stroke','#2c3950')
+      .attr('stroke-width',2).attr('stroke-linecap','round').attr('stroke-opacity',.7);
     // Seed: the origin of the whole tree, where the earliest code sprouts from
     gTrunk.selectAll('circle.seed').data([0]).join(en=>en.append('circle').attr('class','seed'),u=>u,x=>x.remove())
-      .attr('cx',0).attr('cy',yGround).attr('r',9)
-      .attr('fill','#d8a24a').attr('stroke','#ffd98a').attr('stroke-width',2)
-      .attr('filter','url(#glow)');
+      .attr('cx',0).attr('cy',yGround).attr('r',5)
+      .attr('fill','#1a2436').attr('stroke','#4a5b7a').attr('stroke-width',1.5);
     gTrunk.selectAll('text.seedlabel').data([0]).join(en=>en.append('text').attr('class','seedlabel'),u=>u,x=>x.remove())
-      .attr('text-anchor','middle').attr('x',0).attr('y',yGround+26)
-      .attr('fill','#c9a35e').attr('font-size',12).text('Root');
+      .attr('text-anchor','middle').attr('x',0).attr('y',yGround+24)
+      .attr('fill','#5f7090').attr('font-size',11).attr('letter-spacing',1).text('root');
     // Category name: labeled on the left of each tier
     const cl=gTrunk.selectAll('text.catlabel').data(cats, d=>d);
     cl.exit().remove();
@@ -440,9 +439,9 @@
     lk.exit().remove();
     lk.enter().append('path').merge(lk)
       .attr('d',p=>branchPath({x:0,y:p.y+74},{x:p.x,y:p.y}))
-      .attr('fill','none').attr('stroke','#7a512e').attr('stroke-opacity',.9)
+      .attr('fill','none').attr('stroke','#2c3950').attr('stroke-opacity',.75)
       .attr('stroke-linecap','round')
-      .attr('stroke-width',p=>Math.max(2, 9 - p.tier*1.4));
+      .attr('stroke-width',p=>Math.max(1.2, 3 - p.tier*0.5));
 
     // ── File = code-editor window tile ──
     const nd=gNodes.selectAll('g.node').data(placedCards, p=>'f:'+p.cell.path);
@@ -682,7 +681,7 @@
     const r=flowRoute(fromPath, toPath); if(!r) return;
     // 1) Trail line: light up the path just taken, hold briefly, then fade
     const trail=gFlow.append('path').attr('d',r.d).attr('fill','none')
-      .attr('stroke','#4dffb0').attr('stroke-width', r.direct?2.4:1.8)
+      .attr('stroke','#5cc8ff').attr('stroke-width', r.direct?2.4:1.8)
       .attr('stroke-linecap','round').attr('stroke-linejoin','round')
       .attr('stroke-dasharray', r.direct?null:'5 6')
       .attr('stroke-opacity',0).attr('filter','url(#leafglow)');
@@ -691,7 +690,7 @@
     // 2) Glow ball: travels the same path to the new tile, flaring and dispersing on arrival
     const node=trail.node(), L=node.getTotalLength();
     const ball=gFlow.append('circle').attr('r',6)
-      .attr('fill','#eafff5').attr('stroke','#4dffb0').attr('stroke-width',2)
+      .attr('fill','#d6ecff').attr('stroke','#5cc8ff').attr('stroke-width',2)
       .attr('filter','url(#leafglow)').attr('transform',`translate(${posByPath.get(fromPath).x},${posByPath.get(fromPath).y})`);
     ball.transition().duration(680).ease(d3.easeCubicInOut)
       .attrTween('transform',()=> t => { const p=node.getPointAtLength(L*t); return `translate(${p.x},${p.y})`; })

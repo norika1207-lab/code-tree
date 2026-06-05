@@ -6,7 +6,7 @@
 <title>Code Tree</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
 <style>
-  :root { --bg:#060a12; --line:rgba(120,160,220,.18); --ink:#9fb0c6; --neon:#4dffb0; }
+  :root { --bg:#060a12; --line:rgba(120,160,220,.18); --ink:#9fb0c6; --neon:#5cc8ff; }
   * { box-sizing:border-box; }
   html,body { margin:0; height:100%; background:var(--bg); overflow:hidden;
     font-family:-apple-system,"PingFang TC",system-ui,sans-serif; color:#eaf1fb; }
@@ -63,14 +63,14 @@
     font:700 13px/1 "SF Mono",ui-monospace,Menlo,monospace; transition:transform .12s, border-color .12s, color .12s, background .12s; }
   #tabrail .tab:hover { border-color:#8fd9ff; color:#fff; }
   #tabrail .tab.active { border-color:var(--neon); color:#04130c; background:var(--neon);
-    transform:translateX(4px); box-shadow:-2px 0 0 var(--neon), 0 0 16px rgba(77,255,176,.4); }
+    transform:translateX(4px); box-shadow:-2px 0 0 var(--neon), 0 0 16px rgba(92,200,255,.4); }
   #tabrail .tab.dead { opacity:.4; }
   #tabrail .tab .close { position:absolute; top:-4px; right:-4px; width:14px; height:14px; border-radius:50%;
     background:#1a2230; border:1px solid var(--line); color:#cfe0ff; font-size:9px; line-height:12px;
     display:none; align-items:center; justify-content:center; }
   #tabrail .tab:hover .close { display:flex; }
   #tabrail .tab.addbtn { color:var(--neon); font-size:20px; background:transparent; border-style:dashed; }
-  #tabrail .tab.addbtn:hover { background:rgba(77,255,176,.1); color:#fff; border-color:var(--neon); }
+  #tabrail .tab.addbtn:hover { background:rgba(92,200,255,.1); color:#fff; border-color:var(--neon); }
   #tabrail .tab.addbtn.active { transform:none; box-shadow:none; }
   #termwrap { flex:1; min-width:0; position:relative; }
   #termwrap .pane { position:absolute; inset:0; padding:6px 8px; display:none; }
@@ -92,7 +92,7 @@
   #abar button.ghost { background:transparent; }
   /* Draggable divider in the middle */
   #grip { flex:0 0 6px; cursor:col-resize; background:linear-gradient(180deg,rgba(120,160,220,.05),rgba(120,160,220,.18),rgba(120,160,220,.05)); }
-  #grip:hover { background:rgba(77,255,176,.35); }
+  #grip:hover { background:rgba(92,200,255,.35); }
   #right { flex:1 1 42%; min-width:260px; position:relative; border-left:1px solid var(--line); }
   #right iframe { width:100%; height:100%; border:0; background:var(--bg); display:block; }
   /* Hint overlay shown when node-pty isn't installed (leaves 36px at the bottom for the action bar so its buttons stay clickable) */
@@ -149,13 +149,15 @@
   #ask textarea { width:100%; box-sizing:border-box; resize:none; max-height:120px; min-height:20px;
     background:#10151f; color:#eaf1fb; border:1px solid rgba(120,160,220,.22); border-radius:11px;
     padding:9px 40px 9px 13px; line-height:1.4; font:13px/1.4 ui-sans-serif,-apple-system,system-ui; outline:none; }
-  #ask textarea:focus { border-color:rgba(77,255,176,.55); }
+  #ask textarea:focus { border-color:rgba(92,200,255,.55); }
   #ask textarea::placeholder { color:#5d6f88; }
   #ask button { position:absolute; right:18px; bottom:15px; width:22px; height:22px; padding:0;
     display:flex; align-items:center; justify-content:center; border:0; border-radius:6px; cursor:pointer;
-    background:rgba(77,255,176,.16); color:var(--neon); font-size:13px; line-height:1; transition:background .15s; }
-  #ask button:hover { background:rgba(77,255,176,.28); }
+    background:rgba(92,200,255,.16); color:var(--neon); font-size:13px; line-height:1; transition:background .15s; }
+  #ask button:hover { background:rgba(92,200,255,.28); }
   #ask button:disabled { opacity:.4; cursor:default; }
+  /* One input only: the terminal. (The bottom ask box is removed — no second instruction row.) */
+  #ask, #agentlog { display:none !important; }
 </style>
 </head>
 <body>
@@ -174,11 +176,6 @@
       <div id="termrow">
         <div id="tabrail"><button id="tabAdd" class="tab addbtn" title="New terminal tab">+</button></div>
         <div id="termwrap"></div>
-      </div>
-      <div id="agentlog"></div>
-      <div id="ask">
-        <textarea id="askInput" rows="1" placeholder="Ask Bragi to write code…"></textarea>
-        <button id="askSend" title="Send (Enter)">↵</button>
       </div>
       <div id="alerts"></div>
       <div id="masl">
@@ -219,8 +216,8 @@
     fontSize: 13, lineHeight: 1.2, cursorBlink: true,
     scrollback: 5000, // keep a deep history so you can scroll back up to code that already ran
     scrollOnUserInput: true,
-    theme: { background:'#05080e', foreground:'#eaf1fb', cursor:'#4dffb0',
-      black:'#0b0f17', green:'#4dffb0', yellow:'#ffcf4d', red:'#ff6b81',
+    theme: { background:'#05080e', foreground:'#eaf1fb', cursor:"#5cc8ff",
+      black:'#0b0f17', green:"#5fd39a", yellow:'#ffcf4d', red:'#ff6b81',
       blue:'#7fb2ff', cyan:'#86e0ff', white:'#cfe0ff' },
   };
   const tabs = [];           // { id, term, fit, pane, btn, started }
@@ -239,6 +236,23 @@
     const term = new window.Terminal(TERM_OPTS);
     const fit = new window.FitAddon.FitAddon(); term.loadAddon(fit);
     term.open(pane);
+    // IME 中介態守門:macOS 注音/中文 IME composition 期間,xterm.js 預設會逐字送中介注音字進 PTY,
+    // 造成「現在能做什麼ㄒㄧㄕㄚ」這種注音穿透。攔截 textarea 的 input event,composing 期間 stopImmediatePropagation,
+    // 等 compositionend 時手動把成型字串一次送進 PTY。
+    {
+      const ta = pane.querySelector('.xterm-helper-textarea');
+      if (ta) {
+        ta.addEventListener('input', (e) => {
+          if (e.isComposing || (e.inputType && e.inputType.startsWith('insertCompositionText'))) {
+            e.stopImmediatePropagation();
+          }
+        }, true);
+        ta.addEventListener('compositionend', (e) => {
+          if (e.data) send({ type:'pty_input', sessionId:id, data: e.data });
+          ta.value = '';
+        });
+      }
+    }
     term.onData((d) => send({ type:'pty_input', sessionId:id, data:d }));
     const btn = document.createElement('button'); btn.className = 'tab'; btn.textContent = String(tabs.length + 1);
     const x = document.createElement('span'); x.className = 'close'; x.textContent = '✕';
@@ -248,6 +262,17 @@
     rail.insertBefore(btn, addBtn);
     const t = { id, term, fit, pane, btn, started:false };
     tabs.push(t);
+    // Keep the pty's size locked to the ACTUAL visible terminal. Without this, the shell starts at the default
+    // 24 rows while the pane is taller, so full-screen TUIs (claude, vim) draw in the top half and their input
+    // box ends up stranded in the middle with empty space below. Re-fit + tell the pty its real size whenever
+    // the visible pane changes size (initial layout, window resize, divider drag).
+    const ro = new ResizeObserver(() => {
+      if (!pane.classList.contains('active') || pane.clientHeight < 16) return; // only the on-screen pane
+      try { fit.fit(); } catch {}
+      if (t.started && term.cols && term.rows) send({ type:'pty_resize', sessionId:id, cols:term.cols, rows:term.rows });
+    });
+    try { ro.observe(pane); } catch {}
+    t.ro = ro;
     if (socket && socket.readyState === 1) startTab(t);
     switchTab(id);
     return t;
@@ -255,16 +280,14 @@
   function startTab(t){
     if (t.started) return;
     fitActive();
-    // Anchor the prompt to the BOTTOM edge: pre-fill the screen so the shell's first prompt lands at the
-    // bottom, and subsequent output flows up from there (a real terminal sitting at the bottom), instead of
-    // stranding the prompt mid-screen with a field of empty rows below it.
     try {
-      const r = (t.term.rows || 24) - 2; if (r > 0) t.term.write('\n'.repeat(r));
-      // One-line, discoverable hint so the user always knows how to start coding with the bundled local model.
-      t.term.write('\x1b[90m  Bragi local model is on. Type a request in the box below, or run  \x1b[1;36mbragi\x1b[0;90m  here.\x1b[0m\r\n');
+      // Short hint at the top of a normal terminal; the shell prompt follows below and rides the output down.
+      t.term.write('\x1b[90m  Your shell. \x1b[36mcd\x1b[90m into a project or \x1b[36mssh\x1b[90m to a server, then run \x1b[36mclaude\x1b[90m to build with AI.\x1b[0m\r\n');
     } catch {}
     send({ type:'pty_start', sessionId:t.id, cols:t.term.cols||80, rows:t.term.rows||24 });
     t.started = true;
+    // After the pane is laid out, fit once more and push the true size to the pty so full-screen TUIs fill it.
+    requestAnimationFrame(() => { try { t.fit.fit(); } catch {} send({ type:'pty_resize', sessionId:t.id, cols:t.term.cols, rows:t.term.rows }); });
   }
   function switchTab(id){
     activeId = id;
@@ -343,6 +366,7 @@
     const input = document.getElementById('askInput');
     const btn = document.getElementById('askSend');
     const logEl = document.getElementById('agentlog');
+    if (!input || !btn || !logEl) return; // the ask box was removed — single input is the terminal
     let busy = false, buf = '', toolCount = 0;
     function append(cls, text){
       logEl.classList.add('on');
@@ -393,10 +417,20 @@
   // Drag the middle grip: adjust the left/right ratio
   (function dragGrip(){
     const grip = document.getElementById('grip'), left = document.getElementById('left'),
-          right = document.getElementById('right'), split = document.getElementById('split');
+          right = document.getElementById('right'), split = document.getElementById('split'),
+          viz = document.getElementById('viz');
     let dragging = false;
-    grip.addEventListener('mousedown', (e) => { dragging = true; e.preventDefault(); document.body.style.cursor='col-resize'; });
-    addEventListener('mouseup', () => { if(dragging){ dragging=false; document.body.style.cursor=''; relayout(); } });
+    function setDrag(on){
+      dragging = on;
+      document.body.style.cursor = on ? 'col-resize' : '';
+      document.body.style.userSelect = on ? 'none' : '';
+      // CRITICAL: while dragging, let mouse events pass through the right-hand iframe. Otherwise the moment the
+      // cursor crosses onto it the iframe swallows mousemove/mouseup — you can't drag right and the grip sticks.
+      if (viz) viz.style.pointerEvents = on ? 'none' : '';
+    }
+    grip.addEventListener('mousedown', (e) => { e.preventDefault(); setDrag(true); });
+    addEventListener('mouseup', () => { if(dragging){ setDrag(false); relayout(); } });
+    addEventListener('mouseleave', () => { if(dragging){ setDrag(false); relayout(); } }); // release if the cursor leaves the window
     addEventListener('mousemove', (e) => {
       if(!dragging) return;
       const total = split.clientWidth, x = Math.max(280, Math.min(e.clientX, total-260));
