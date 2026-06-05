@@ -3,6 +3,7 @@
 // Auth, tool execution, context, and permissions are all handled by the SDK (borrowing the Claude Code login).
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { buildDepIndex, assessTool, isMutation } from '../masl/gate.js';
+import { designGuidance } from './design.js';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
@@ -53,11 +54,14 @@ export function createSdkAgent({ root, model, onEvent, emit, getState, onGate, l
     let recalled = '';
     try { recalled = memory?.recall?.(userText) || ''; } catch {}
     if (recalled) onEvent({ type: 'recall', text: recalled });
+    const design = designGuidance(userText); // premium-UI discipline for frontend tasks
+    if (design) onEvent({ type: 'design' });
     const filesModified = new Set();
     let lastText = '';
 
+    const preamble = [recalled, design].filter(Boolean).join('\n\n');
     const q = query({
-      prompt: recalled ? `${recalled}\n\n---\nTask: ${userText}` : userText,
+      prompt: preamble ? `${preamble}\n\n---\nTask: ${userText}` : userText,
       options: {
         cwd: root,
         canUseTool, // MASL: use the permission hook as the last gate, no more bypass

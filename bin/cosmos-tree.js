@@ -295,6 +295,8 @@ function App() {
           if (wsRef.current?.readyState === 1) {
             wsRef.current.send(JSON.stringify({ type: 'recall', count: n, text: e.text.slice(0, 600) }));
           }
+        } else if (e.type === 'design') {
+          pushFeed({ kind: 'tool', name: '🎨 design system applied (premium UI discipline)', path: '' });
         } else if (e.type === 'tier') {
           setTier(e.name);
           pushFeed({ kind: 'tool', name: e.index === 0 ? `↳ using ${e.name} (trying the cheap one first)` : `↗ escalating to ${e.name}`, path: '' });

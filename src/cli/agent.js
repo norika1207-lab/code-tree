@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { TOOL_DEFS, makeExecutor } from './tools.js';
 import { verifyChangedFiles, formatProblems } from './verify.js';
+import { designGuidance } from './design.js';
 
 // Small models often narrate "the file I'll read next" in text instead of actually issuing read_file (narrate-instead-of-call).
 // Pull from this closing text the source paths it named that actually exist and haven't been read, and have the loop issue read_file on its behalf,
@@ -57,6 +58,9 @@ export function createAgent({ llm, root, emit, onEvent, model, systemSuffix, mem
         onEvent({ type: 'recall', text: recalled });
       }
     }
+    // Design taste: if this task builds/styles a UI, inject the design discipline so the output is premium, not generic
+    const design = designGuidance(userText);
+    if (design) { runSystem = `${runSystem}\n\n${design}`; onEvent({ type: 'design' }); }
 
     // Trajectory collection: which files this task read/modified, how many tool calls, and what the last turn said
     const filesRead = new Set();
