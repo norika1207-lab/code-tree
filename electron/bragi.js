@@ -39,6 +39,9 @@ export function startBragi({ resourcesPath, execPath, logln = () => {} } = {}) {
     const dir = bragiDir(resourcesPath);
     const llamaBin = path.join(dir, 'llama-server');
     const proxyJs = path.join(dir, 'bragi-server.js');
+    // Tell core where engine_lib.py lives so it can drop it into projects for Bragi's intercepted code to run.
+    const enginePy = path.join(dir, 'engine_lib.py');
+    if (fs.existsSync(enginePy)) process.env.BRAGI_ENGINE_LIB = enginePy;
     if (!fs.existsSync(llamaBin)) { logln('[bragi] llama-server not found at', llamaBin, '— skipping local model'); return; }
     if (!fs.existsSync(proxyJs)) { logln('[bragi] bragi-server.js not found — skipping local model'); return; }
     const model = findModel(dir);

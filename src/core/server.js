@@ -220,8 +220,24 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   // ── Scan watcher: its root can be swapped by reroot, so the world tree on the right follows the terminal's cwd ──
   let ready = false;
   let watcher = null;
+  // When the bundled Bragi model is active, its intercepted answers are `from engine_lib import X as _eng`.
+  // Make that import actually resolve by dropping the ~7 KB engine_lib.py into the project root — but only
+  // when a Bragi runtime is present (BRAGI_ENGINE_LIB set) and the project doesn't already have one.
+  // Never overwrites an existing file; silent no-op when Bragi isn't in use.
+  function ensureEngineLib(dir) {
+    try {
+      const src = process.env.BRAGI_ENGINE_LIB;
+      if (!src || !fs.existsSync(src) || !dir || !fs.existsSync(dir)) return;
+      const dst = path.join(dir, 'engine_lib.py');
+      if (fs.existsSync(dst)) return;
+      fs.copyFileSync(src, dst);
+      log('installed engine_lib.py into project (Bragi intercepts can run):', dst);
+    } catch {}
+  }
+
   function attachWatcher() {
     ready = false;
+    ensureEngineLib(root); // runs on first start and on every reroot (cd into a new project)
     watcher = chokidar.watch(root, {
       ignored: (p) => isIgnored(p), // chokidar v4: ignored takes a function, no longer a glob
       ignoreInitial: false,
