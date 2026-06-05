@@ -80,6 +80,15 @@
       "!node_modules/@openai/**",
       "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
+    "extraResources": [
+      {
+        "from": "runtime/bragi",
+        "to": "bragi",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "identity": null,

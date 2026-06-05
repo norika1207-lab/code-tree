@@ -6,6 +6,10 @@ dist-web/
 release/
 *.tgz
 
+# Bragi local-model runtime (llama-server binary + 786MB GGUF): staged locally before build,
+# bundled into the app via extraResources. Too big for git.
+runtime/
+
 # 系統/編輯器垃圾
 ._*
 .DS_Store

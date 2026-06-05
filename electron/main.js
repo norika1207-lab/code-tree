@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { startCore } from '../src/core/server.js';
+import { startBragi, stopBragi } from './bragi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PREF = path.join(app.getPath('userData'), 'prefs.json');
@@ -179,6 +180,9 @@ function buildMenu() {
 
 app.whenReady().then(async () => {
   logln('app ready, userData=', app.getPath('userData'));
+  // Fire up the bundled on-device model (llama-server + bragi proxy) in the background. Non-blocking and
+  // non-fatal: local-detect.js picks it up on :8080 once ready; if the model is missing we just log and skip.
+  startBragi({ resourcesPath: process.resourcesPath, execPath: process.execPath, logln });
   buildMenu();
   createWindow();
   // show a welcome screen first to avoid a blank window
@@ -204,4 +208,4 @@ app.whenReady().then(async () => {
 
 app.on('activate', () => { if (!win) createWindow(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { if (core) try { core.close(); } catch {} });
+app.on('before-quit', () => { try { stopBragi(); } catch {} if (core) try { core.close(); } catch {} });
