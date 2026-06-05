@@ -79,6 +79,12 @@
     animation:warn 1s ease-in-out infinite; }
   .fcard.error .badge { background:var(--red); color:#1a0307; }
   @keyframes warn { 0%,100%{box-shadow:0 0 0 2px var(--red),0 0 30px rgba(255,107,129,.5)} 50%{box-shadow:0 0 0 2px var(--red),0 0 46px rgba(255,107,129,.9)} }
+  /* Being written into right now: the tile pulses neon while code visibly streams into it line by line */
+  .fcard.writing { border-color:var(--neon); }
+  .fcard.writing { animation:writepulse .7s ease-in-out infinite; }
+  @keyframes writepulse { 0%,100%{box-shadow:0 0 0 2px var(--neon),0 0 26px rgba(77,255,176,.5)} 50%{box-shadow:0 0 0 2px var(--neon),0 0 48px rgba(77,255,176,.95)} }
+  .fcard.writing .bd::after { content:'▏'; color:var(--neon); font-weight:700; animation:caret .6s steps(1) infinite; }
+  @keyframes caret { 0%,100%{opacity:1} 50%{opacity:0} }
   /* Birth order: which file was built first, which came later */
   .fcard .hd .seq { flex:0 0 auto; font-size:10px; font-weight:800; color:#9fb4d6;
     background:rgba(120,160,220,.16); border-radius:5px; padding:1px 6px; letter-spacing:.3px; }
@@ -300,6 +306,21 @@
     fetch('/file?path='+encodeURIComponent(p)).then(r=> r.ok ? r.text() : '').then(t=>{ contentByPath.set(p,t); cb&&cb(t); }).catch(()=>{});
   }
   function clip(t){ return (t||'').replace(/\t/g,'  ').split('\n').slice(0,16).join('\n'); }
+  // Map each file path → its tile's <pre> body element, so when that file is edited we can stream the new
+  // code straight into the exact tile (the "watch code get stuffed in" effect), not just snap it.
+  const bdEls = new Map();
+  function streamInto(pre, target){
+    if(!pre) return;
+    const lines = String(target||'').split('\n');
+    let i = 0;
+    clearInterval(pre._tw);
+    pre.textContent = '';
+    pre._tw = setInterval(()=>{
+      i++;
+      pre.textContent = lines.slice(0, i).join('\n');
+      if(i >= lines.length){ clearInterval(pre._tw); pre._tw = null; }
+    }, 55);
+  }
 
   function buildHierarchy(cells, rootName){
     const root={name:rootName,children:[],dir:true};
@@ -438,8 +459,10 @@
     all.select('.badge').text(p=>cardBadge(p.cell));
     all.select('pre.bd').each(function(p){
       const path=p.cell.path, pre=this;
+      bdEls.set(path, pre);
+      if(pre._tw) return; // a stream-in animation is filling this tile right now — don't clobber it
       if(contentByPath.has(path)) pre.textContent=clip(contentByPath.get(path));
-      else { if(!pre.textContent) pre.textContent='…'; fetchContent(path, txt=>{ pre.textContent=clip(txt); }); }
+      else { if(!pre.textContent) pre.textContent='…'; fetchContent(path, txt=>{ if(!pre._tw) pre.textContent=clip(txt); }); }
     });
 
     // ── Collapsed files → small leaf dots (click to pin as a card and open) ──
@@ -776,9 +799,18 @@
       }
       else if(m.type==='active' && m.payload) setActive(m.payload.path);
       else if(m.type==='activity' && m.payload && m.payload.action!=='read'){
-        contentByPath.delete(m.payload.path);   // File changed, so make that tile re-fetch the latest code
-        noteChange(m.payload.path, m.payload.count);
-        setActive(m.payload.path);
+        const path=m.payload.path;
+        contentByPath.delete(path);   // File changed, so re-fetch the latest code
+        noteChange(path, m.payload.count);
+        setActive(path);
+        // Light the tile up and visibly stream the new code into it, so you watch code get stuffed in.
+        fetchContent(path, txt=>{
+          const pre = bdEls.get(path);
+          if(!pre) return;
+          const card = pre.closest('.fcard');
+          if(card){ card.classList.add('writing'); clearTimeout(card._wt); card._wt=setTimeout(()=>card.classList.remove('writing'), 1800); }
+          streamInto(pre, clip(txt));
+        });
       }
     };
   }
