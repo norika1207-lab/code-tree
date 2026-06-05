@@ -42,9 +42,23 @@ export async function detectLocalLLM({ preferModel } = {}) {
     };
   }
 
-  // 0.5) Bragi-LLM proxy on :8080 (preferred when available).
-  // Bragi is the on-device coder we ship with Code Tree. Its /v1/health returns { model: 'bragi-llm', upstream: 'up' }.
-  // If Bragi is running, prefer it: smaller (805 MB), MBPP 92%, zero subscription.
+  // 0.4) Bragi template stack on :9090 (highest priority when available).
+  // This is the conversational template + slot-fill server, NOT the raw 1.5B model.
+  // Health returns { model: 'templates-bragi-llm', templates: N, engine: 'st'|'tfidf' }.
+  // Hit this first because it handles common dev requests via template retrieval,
+  // and falls through to raw Bragi (:8080) for unrecognised prompts.
+  const tplHealth = await getJson('http://localhost:9090/v1/health', 1500);
+  if (tplHealth && tplHealth.model === 'templates-bragi-llm') {
+    return {
+      baseURL: 'http://localhost:9090/v1',
+      model: 'templates-bragi-llm',
+      provider: 'bragi-templates',
+      models: ['templates-bragi-llm'],
+    };
+  }
+
+  // 0.5) Bragi-LLM raw proxy on :8080 (used by template stack as fallback;
+  // also usable standalone for MBPP-style narrow tasks).
   const bragiHealth = await getJson('http://localhost:8080/v1/health', 1500);
   if (bragiHealth && bragiHealth.model === 'bragi-llm' && bragiHealth.upstream === 'up') {
     return {
