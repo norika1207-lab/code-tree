@@ -64,7 +64,7 @@
     "dev": "node bin/cosmos-tree.js",
     "app": "electron .",
     "gui": "node bin/codetree.js",
-    "dist": "electron-builder --mac",
+    "dist": "bash scripts/build-mac.sh",
     "dist:dir": "electron-builder --mac dir"
   },
   "build": {
