@@ -133,6 +133,25 @@
   #masl .deny { background:#ff6b81; border-color:#ff6b81; color:#1a0306; font-weight:650; }
   #masl .deny:hover { background:#ff8193; }
   #masl .allow { background:transparent; color:#cfe0ff; } #masl .allow:hover { border-color:var(--neon); color:#fff; }
+  /* Ask Bragi: type a request, it writes code with the local model (no commands to memorise). */
+  #agentlog { flex:0 0 auto; max-height:38%; overflow-y:auto; display:none; padding:9px 12px;
+    border-top:1px solid rgba(120,160,220,.18); background:#070b12;
+    font:12px/1.55 ui-monospace,Menlo,monospace; }
+  #agentlog.on { display:block; }
+  #agentlog .u { color:#86e0ff; margin:7px 0 3px; font-weight:600; }
+  #agentlog .t { color:#9fb4d6; white-space:pre-wrap; }
+  #agentlog .tool { color:var(--neon); }
+  #agentlog .err { color:#ff6b81; }
+  #ask { flex:0 0 auto; display:flex; gap:8px; align-items:flex-end; padding:8px 10px;
+    border-top:1px solid rgba(120,160,220,.18); background:#0a0f17; }
+  #ask textarea { flex:1; resize:none; max-height:120px; min-height:20px; background:#10151f; color:#eaf1fb;
+    border:1px solid rgba(120,160,220,.28); border-radius:9px; padding:8px 11px; line-height:1.4;
+    font:13px/1.4 ui-sans-serif,-apple-system,system-ui; outline:none; }
+  #ask textarea:focus { border-color:var(--neon); }
+  #ask textarea::placeholder { color:#5d6f88; }
+  #ask button { flex:0 0 auto; background:var(--neon); color:#04130c; border:0; border-radius:9px;
+    padding:9px 16px; font-weight:700; cursor:pointer; font:inherit; }
+  #ask button:disabled { opacity:.45; cursor:default; }
 </style>
 </head>
 <body>
@@ -151,6 +170,11 @@
       <div id="termrow">
         <div id="tabrail"><button id="tabAdd" class="tab addbtn" title="New terminal tab">+</button></div>
         <div id="termwrap"></div>
+      </div>
+      <div id="agentlog"></div>
+      <div id="ask">
+        <textarea id="askInput" rows="1" placeholder="Ask Bragi to write code…  (Enter to run)"></textarea>
+        <button id="askSend">Run ▸</button>
       </div>
       <div id="alerts"></div>
       <div id="masl">
@@ -230,7 +254,11 @@
     // Anchor the prompt to the BOTTOM edge: pre-fill the screen so the shell's first prompt lands at the
     // bottom, and subsequent output flows up from there (a real terminal sitting at the bottom), instead of
     // stranding the prompt mid-screen with a field of empty rows below it.
-    try { const r = (t.term.rows || 24) - 1; if (r > 0) t.term.write('\n'.repeat(r)); } catch {}
+    try {
+      const r = (t.term.rows || 24) - 2; if (r > 0) t.term.write('\n'.repeat(r));
+      // One-line, discoverable hint so the user always knows how to start coding with the bundled local model.
+      t.term.write('\x1b[90m  Bragi local model is on. Code with it here →  \x1b[1;36mcosmos-tree --local .\x1b[0m\r\n');
+    } catch {}
     send({ type:'pty_start', sessionId:t.id, cols:t.term.cols||80, rows:t.term.rows||24 });
     t.started = true;
   }
@@ -295,11 +323,50 @@
         if (nm) nm.textContent = m.payload.label || 'Project';
         if (pj) pj.classList.remove('none');
       }
+      // The "Ask Bragi" composer: stream the agent's words + tool actions as it writes code for your request
+      else if (m.type === 'agent_text' && m.payload) window.__agent && window.__agent.text(m.payload.delta);
+      else if (m.type === 'agent_tool' && m.payload) window.__agent && window.__agent.tool(m.payload.name, m.payload.path);
+      else if (m.type === 'agent_error' && m.payload) window.__agent && window.__agent.error(m.payload.message);
+      else if (m.type === 'agent_turn_end') window.__agent && window.__agent.end();
       // Visualization messages like state / active are handled by the right iframe's own connection; this one only handles the terminal
     };
     ws.onclose = () => { tabs.forEach(t => t.started = false); setTimeout(connect, 1500); };
   }
   connect();
+
+  // ── "Ask Bragi": type a request → core runs the local model → it writes the code, tree grows on the right ──
+  (function composer(){
+    const input = document.getElementById('askInput');
+    const btn = document.getElementById('askSend');
+    const logEl = document.getElementById('agentlog');
+    let busy = false;
+    function append(cls, text){
+      logEl.classList.add('on');
+      const last = logEl.lastChild;
+      if (cls === 't' && last && last.classList && last.classList.contains('t')) { last.textContent += text; }
+      else { const d = document.createElement('div'); d.className = cls; d.textContent = text; logEl.appendChild(d); }
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setBusy(b){ busy = b; btn.disabled = b; btn.textContent = b ? 'Working…' : 'Run ▸'; }
+    function run(){
+      const text = input.value.trim();
+      if (!text || busy) return;
+      if (!socket || socket.readyState !== 1) { append('err', '⚠ not connected yet, try again in a second'); return; }
+      setBusy(true);
+      append('u', '▸ ' + text);
+      send({ type:'run', text });
+      input.value = ''; input.style.height = 'auto';
+    }
+    btn.onclick = run;
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
+    input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
+    window.__agent = {
+      text: (d) => append('t', d),
+      tool: (name, path) => append('tool', '● ' + name + (path ? '  ' + String(path).split('/').pop() : '')),
+      error: (msg) => { append('err', '⚠ ' + msg); setBusy(false); },
+      end: () => { setBusy(false); },
+    };
+  })();
 
   // Window / divider changes → re-fit the active terminal and tell its shell the new size
   function relayout(){

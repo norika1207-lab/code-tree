@@ -16,6 +16,9 @@ import { createRemoteSource } from './remote-source.js';
 import { createRunner } from './runner.js';
 import { createSdkAgent } from '../cli/sdk-agent.js';
 import { createRoutedAgent } from '../cli/routed-agent.js';
+import { createAgent } from '../cli/agent.js';
+import { createLocalLLM } from '../cli/local-llm.js';
+import { createMemory } from '../cli/memory.js';
 import { readUsage } from './token-meter.js';
 import { computeSavings } from './token-savings.js';
 import { createSessionLogger } from './session-log.js';
@@ -196,6 +199,15 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   const LOCAL_URL = process.env.CODETREE_LOCAL_URL || 'http://localhost:8000/v1';
   const LOCAL_MODEL = process.env.CODETREE_LOCAL_MODEL || 'qwen-coder';
   const defaultAgent = ({ onEvent, emit, getState, onGate, lastSaid }) => {
+    if (ENGINE === 'local') {
+      // Pure on-device: type a request in the app and the bundled Bragi model writes the code. No cloud, no login.
+      log(`local engine: using ${LOCAL_MODEL} at ${LOCAL_URL} (fully offline, zero API)`);
+      return createAgent({
+        llm: createLocalLLM({ baseURL: LOCAL_URL, model: LOCAL_MODEL }),
+        root, emit, onEvent, systemSuffix: LOCAL_DISCIPLINE,
+        memory: createMemory({ root, model: LOCAL_MODEL }),
+      });
+    }
     if (ENGINE === 'routed') {
       log(`token-saving engine enabled: try local ${LOCAL_MODEL} first (${LOCAL_URL}), escalate to Claude only if it fails`);
       return createRoutedAgent({

@@ -52,6 +52,12 @@ export function startBragi({ resourcesPath, execPath, logln = () => {} } = {}) {
     }
     try { fs.chmodSync(llamaBin, 0o755); } catch {}
 
+    // Point Code Tree's in-app agent ("type a request, it writes code") at the local Bragi model — pure
+    // offline, no login. The core's defaultAgent reads these env vars and uses the local engine.
+    process.env.CODETREE_ENGINE = 'local';
+    process.env.CODETREE_LOCAL_URL = 'http://localhost:8080/v1';
+    process.env.CODETREE_LOCAL_MODEL = 'bragi-llm';
+
     // -ngl 99 offloads to Apple Metal; harmless on CPU-only machines (llama.cpp falls back).
     logln('[bragi] starting llama-server', model);
     llama = spawn(llamaBin, ['-m', model, '--host', '127.0.0.1', '--port', '8081',
