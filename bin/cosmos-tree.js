@@ -23,7 +23,7 @@ import { createSdkAgent } from '../src/cli/sdk-agent.js';
 import { createCodexAgent } from '../src/cli/codex-agent.js';
 import { createRoutedAgent } from '../src/cli/routed-agent.js';
 import { demoScript, resetSample } from '../src/cli/demo.js';
-import { createTokenMeter, fetchSavings, fmtTok } from '../src/cli/tokens.js';
+import { createTokenMeter, fmtTok } from '../src/cli/tokens.js';
 import { reportLines } from '../src/masl/gate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -168,8 +168,6 @@ function App() {
   const [notice, setNotice] = useState(DEMO ? '🎬 Demo mode: scripted agent replays scenario one' : '');
   const [tok, setTok] = useState({ total: { burned: 0, all: 0 }, turn: { burned: 0 } }); // live usage
   const [tier, setTier] = useState(null); // routed engine's current tier: 'local' → 'claude'
-  const [savings, setSavings] = useState(null); // machine-wide cache waste (mercury tool)
-  const [savingBusy, setSavingBusy] = useState(false);
   const [gate, setGate] = useState(null); // MASL pending approval: { report, agentSaid }
   const [visited, setVisited] = useState([]); // cells the agent visited (in time order) → right-pane flow diagram
   const [tick, setTick] = useState(0); // animation beat: drives the light ball down the line
@@ -186,9 +184,25 @@ function App() {
     feedRef.current = [...feedRef.current, item].slice(-200);
     setFeed(feedRef.current);
   }
+  // Print EVERY word the agent emits into the permanent transcript (not a black box). Long lines are
+  // hard-wrapped to the terminal width at commit time so each transcript row is one line and nothing is lost.
+  function commitText(s) {
+    const COLS = process.stdout.columns || 100;
+    const w = Math.max(40, COLS - 40); // leave room for the right-hand flow pane + padding
+    for (const raw of String(s).split('\n')) {
+      let rest = raw.replace(/\t/g, '  ').replace(/\s+$/, '');
+      if (!rest.trim()) continue;
+      while (rest.length > w) {
+        let cut = rest.lastIndexOf(' ', w);
+        if (cut < w * 0.5) cut = w;
+        pushFeed({ kind: 'text', text: rest.slice(0, cut) });
+        rest = rest.slice(cut).replace(/^\s+/, '');
+      }
+      if (rest) pushFeed({ kind: 'text', text: rest });
+    }
+  }
   function flushThinking() {
-    const t = thinkingRef.current.trim();
-    if (t) pushFeed({ kind: 'text', text: t });
+    if (thinkingRef.current.trim()) commitText(thinkingRef.current);
     thinkingRef.current = '';
     setThinking('');
   }
@@ -266,7 +280,14 @@ function App() {
       const onEvent = (e) => {
         if (e.type === 'text') {
           thinkingRef.current += e.delta;
-          setThinking(thinkingRef.current.slice(-400));
+          // Commit completed lines to the permanent transcript as they arrive, so the agent's words print
+          // top-down and stay on screen; the unfinished tail keeps streaming live below them.
+          const nl = thinkingRef.current.lastIndexOf('\n');
+          if (nl !== -1) {
+            commitText(thinkingRef.current.slice(0, nl + 1));
+            thinkingRef.current = thinkingRef.current.slice(nl + 1);
+          }
+          setThinking(thinkingRef.current.slice(-300));
         } else if (e.type === 'tool') {
           flushThinking(); // a tool arrived, so collapse this thinking into one line first
           pushFeed({ kind: 'tool', name: e.name, path: e.path });
@@ -339,23 +360,6 @@ function App() {
     })();
   }, []);
 
-  // measure machine-wide cache waste (runs python in the background, doesn't block the UI)
-  function refreshSavings() {
-    if (savingBusy) return;
-    setSavingBusy(true);
-    fetchSavings().then((s) => {
-      if (s && s.ok) setSavings(s);
-      setSavingBusy(false);
-    }).catch(() => setSavingBusy(false));
-  }
-
-  // measure once at startup, then re-measure every 90s (cache state drifts as you develop)
-  useEffect(() => {
-    refreshSavings();
-    const t = setInterval(refreshSavings, 90 * 1000);
-    return () => clearInterval(t);
-  }, []);
-
   // animation beat: light ball runs down the connecting line (for the right-pane flow diagram)
   useEffect(() => {
     const t = setInterval(() => setTick((x) => (x + 1) % 1000), 140);
@@ -397,16 +401,11 @@ function App() {
         }
         return;
       }
-      // Ctrl+L: clear / re-measure cache waste. Cosmos measures it for you; to actually release it, hit /clear in your agent's terminal.
+      // Ctrl+L: reset this turn's token counter (just the live "now" number; the session totals stay).
       if (key.ctrl && ch === 'l') {
-        const w = savings?.wasted_tokens || 0;
-        const usd = savings?.clear_now_savings_usd || 0;
         meterRef.current.startTurn();
         setTok(meterRef.current.snapshot());
-        refreshSavings();
-        setNotice(w > 0
-          ? `🧹 About ${fmtTok(w)} tokens of waste can be cleared (clearing now saves $${usd.toFixed(2)}). Hit /clear in the terminal running your agent to release it. Re-measuring…`
-          : '🧹 Re-measuring cache waste…');
+        setNotice('🧹 Token counter reset.');
         return;
       }
       if (key.tab) { setView((v) => (v === 'split' ? 'tree' : 'split')); return; } // Tree View can be toggled anytime
@@ -482,7 +481,10 @@ function App() {
   // ── split view (default): transcript on the left (terminal text stream), flow diagram on the right ──
   function splitView() {
     const flow = flowLines();
-    const feedLines = feed.slice(-16);
+    // Cap the transcript window to what fits above the pinned footer, so the input never gets pushed off-screen.
+    const rows = process.stdout.rows || 30;
+    const maxFeed = Math.max(4, rows - 12);
+    const feedLines = feed.slice(-maxFeed);
 
     return h(
       Box,
@@ -521,9 +523,7 @@ function App() {
     );
   }
 
-  // ── token bar: burned this session / in use now / total + machine-wide clearable waste ──
-  const wasteTok = savings?.wasted_tokens || 0;
-  const clearUsd = savings?.clear_now_savings_usd || 0;
+  // ── token bar: real, measured counts only — burned this session / in use now / total. No fudge metric. ──
   const tokenBar = h(
     Box,
     { borderStyle: 'single', borderColor: 'gray', borderLeft: false, borderRight: false, paddingX: 1, justifyContent: 'space-between' },
@@ -538,12 +538,7 @@ function App() {
       tier ? h(Text, { color: tier === 'local' ? 'greenBright' : 'magenta' }, 'tier ' + tier) : null,
     ),
     h(Box, {},
-      savingBusy
-        ? h(Text, { color: 'gray' }, 'measuring…')
-        : wasteTok > 0
-          ? h(Text, { color: 'red' }, fmtTok(wasteTok) + ' waste clearable (save $' + clearUsd.toFixed(2) + ')')
-          : h(Text, { color: 'gray' }, savings ? 'no waste' : '—'),
-      h(Text, { color: 'gray' }, '  [Ctrl+L] clear'),
+      h(Text, { color: 'gray' }, '[Ctrl+L] reset counter'),
     ),
   );
 
@@ -570,16 +565,17 @@ function App() {
     h(Text, { color: 'gray' }, '[Enter] send　[Tab] ' + (view === 'split' ? 'open full tree' : 'back to flow') + '　[Ctrl+L] clear tokens　[Ctrl+C] exit')
   );
 
-  // Fill the terminal height and anchor the conversation + input to the BOTTOM (chat-style: content grows
-  // upward, the command line sits at the very bottom), instead of bunching everything at the top.
+  // Fill the terminal height: the transcript prints from the TOP and grows downward, an elastic gap sits in
+  // the MIDDLE, and the command line is pinned to the very BOTTOM. So new output streams down from the top
+  // while the input always stays put at the bottom edge — never floating in the middle.
   const rows = process.stdout.rows || 30;
   return h(
     Box,
     { flexDirection: 'column', height: rows, paddingX: 1 },
     header,
     subhead,
-    h(Box, { flexGrow: 1 }), // elastic spacer pushes the conversation + input down to the bottom
     view === 'split' ? splitView() : treeView(),
+    h(Box, { flexGrow: 1 }), // elastic gap in the middle → keeps data at the top and the input at the bottom
     footer
   );
 }

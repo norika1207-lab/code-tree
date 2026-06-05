@@ -295,7 +295,9 @@
   // The real code shown inside each tile (fetch /file, cache it; when the file changes, force a re-fetch)
   const contentByPath=new Map();
   function fetchContent(p, cb){
-    fetch('/file?path='+encodeURIComponent(p)).then(r=>r.text()).then(t=>{ contentByPath.set(p,t); cb&&cb(t); }).catch(()=>{});
+    // If the file can't be read (e.g. it lives on a remote box we haven't fetched yet), show nothing rather than
+    // pasting the raw "cannot read: ENOENT…" error text into the card as if it were the file's source.
+    fetch('/file?path='+encodeURIComponent(p)).then(r=> r.ok ? r.text() : '').then(t=>{ contentByPath.set(p,t); cb&&cb(t); }).catch(()=>{});
   }
   function clip(t){ return (t||'').replace(/\t/g,'  ').split('\n').slice(0,16).join('\n'); }
 

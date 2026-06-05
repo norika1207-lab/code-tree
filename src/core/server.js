@@ -426,7 +426,9 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     saveTimer = setInterval(broadcastSavings, 10000);
   }
   function stopSavings() { if (saveTimer) clearInterval(saveTimer); saveTimer = null; }
-  startSavings();
+  // Disabled: the "cost of not clearing cache" figure was a speculative estimate, not a measured number.
+  // We only surface real, measured token counts now (input / cache hits / output / burned). No fudge metric.
+  void startSavings; void stopSavings;
 
   function emitActivity(cell, action) {
     broadcast({

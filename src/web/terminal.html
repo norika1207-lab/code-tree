@@ -84,6 +84,7 @@
   #abar .proj.none .pin { background:#6b7689; box-shadow:none; }
   #abar .proj .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #abar .spacer { flex:1; }
+  #abar .hint { flex:0 0 auto; color:#6b7689; font-size:11px; letter-spacing:.02em; }
   #abar button { font:inherit; color:#dbe6f7; background:rgba(120,160,220,.12);
     border:1px solid var(--line); border-radius:8px; padding:5px 13px; cursor:pointer;
     transition:border-color .15s, color .15s; }
@@ -143,10 +144,8 @@
           <span class="tk"><span>Input</span><b id="tkIn">0</b></span>
           <span class="tk"><span>Cache hits</span><b id="tkCache">0</b></span>
           <span class="tk"><span>Output</span><b id="tkOut">0</b></span>
-          <span class="tk save"><span>Saved</span><b id="tkSave">0</b></span>
           <span class="tk burn"><span>Burned</span><b id="tkBurn">0</b></span>
         </div>
-        <span id="tkWaste" class="waste" title="Cost of not clearing your cache over the next hour">Waste $0.00</span>
         <button id="tkClear">Clear</button>
       </div>
       <div id="termrow">
@@ -173,8 +172,7 @@
       <div id="abar">
         <span class="proj" id="abarProj"><span class="pin"></span><span class="nm" id="abarName">Project</span></span>
         <span class="spacer"></span>
-        <button id="btnOpen">Open project…</button>
-        <button id="btnNone" class="ghost">No project</button>
+        <span class="hint" id="abarHint">follows your shell automatically</span>
       </div>
     </div>
     <div id="grip"></div>
@@ -282,20 +280,7 @@
         const p = m.payload;
         const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = f(v); };
         set('tkIn', p.input); set('tkCache', p.cacheRead); set('tkOut', p.output);
-        set('tkSave', p.saved); set('tkBurn', p.burned);
-      }
-      else if (m.type === 'savings' && m.payload) {
-        // Cost of not clearing: clear the cache now and you save roughly this much over the next hour = not clearing burns this much for nothing
-        const el = document.getElementById('tkWaste');
-        if (el) {
-          const usd = m.payload.clearNowUsd || 0;
-          el.textContent = 'Waste $' + usd.toFixed(2);
-          el.classList.toggle('warn', usd >= 0.1 && usd < 1);
-          el.classList.toggle('hot', usd >= 1);
-          el.title = usd > 0
-            ? `Not clearing your cache burns about $${usd.toFixed(2)} over the next hour (${m.payload.nActive} active session(s) holding stale cache)`
-            : 'No stale cache right now, nothing wasted by not clearing';
-        }
+        set('tkBurn', p.burned);
       }
       else if (m.type === 'project' && m.payload) {
         // Terminal cd's into a new project → the project name in the bottom bar switches to match, and the green dot lights up
@@ -398,19 +383,9 @@
   (function actionBar(){
     const proj = document.getElementById('abarProj');
     const nameEl = document.getElementById('abarName');
-    const btnOpen = document.getElementById('btnOpen');
-    const btnNone = document.getElementById('btnNone');
     nameEl.textContent = window.__PROJECT_LABEL__ || 'Project';
     if (window.__NO_PROJECT__ === true) proj.classList.add('none');
-    const bridge = window.codetree;   // Only present in the desktop app (Electron preload)
-    if (bridge) {
-      btnOpen.onclick = () => bridge.pickProject();
-      btnNone.onclick = () => bridge.openNoProject();
-    } else {
-      // Plain browser page: picking a folder needs a native dialog, so hide the buttons and keep only the project name
-      btnOpen.style.display = 'none';
-      btnNone.style.display = 'none';
-    }
+    // No buttons: the tree follows whatever project your shell cd's into (local or over ssh) automatically.
   })();
   </script>
 </body>
