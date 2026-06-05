@@ -577,20 +577,26 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     // Only honour a host that's a real ssh alias (from ~/.ssh/config) or a user@host form, so we don't chase
     // random `word:/path` strings. URLs (http://…:port/) don't match because the host can't start with a digit.
     const MENTION_RE = /(?:^|[\s"'`([])((?:[a-z_][\w.-]{0,30}@)?[a-z_][\w.-]{1,40}):(\/(?:opt|home|srv|root|var|app|Users|workspace|data|projects)[\w./-]*)/gi;
+    // The reliable signal for an agent (claude/codex) working remotely: it prints its own command, e.g.
+    //   Bash(ssh sportverse "cd /opt/vidgen && ...")
+    // Capture the host and the cd'd path from that. Works for both quote styles and optional ssh flags.
+    const SSH_CMD_RE = /\bssh\s+(?:-\S+\s+)*([a-z_][\w.@-]+)\s+["'][^"']*?\bcd\s+(\/[\w./-]+)/gi;
     function detectRemoteFromOutput(entry, data) {
-      entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-2000);
+      entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-3000);
       // (a) you ssh'd in OUR shell → follow the remote prompt's cwd
       if (entry.sshTarget) {
         const last = entry.outbuf.split('\n').pop();
         const p = PROMPT_RE.exec(last || '');
         if (p && p[3].startsWith('/')) { enterRemote(entry.sshTarget, p[3]); return; }
       }
-      // (b) the agent printed a remote target → follow it (the ssh happened inside the agent, not our shell)
-      let m, best = null; MENTION_RE.lastIndex = 0;
-      while ((m = MENTION_RE.exec(entry.outbuf)) !== null) {
-        const host = m[1], root = m[2];
-        if (host.includes('@') || SSH_ALIASES.has(host)) best = { host, root };
+      let best = null, m;
+      // (b) an agent ran `ssh <host> "cd <path> && ..."` — the most reliable remote signal
+      SSH_CMD_RE.lastIndex = 0;
+      while ((m = SSH_CMD_RE.exec(entry.outbuf)) !== null) {
+        if (m[1].includes('@') || SSH_ALIASES.has(m[1])) best = { host: m[1], root: m[2] };
       }
+      // (c) fallback: a bare `host:/path` mention
+      if (!best) { MENTION_RE.lastIndex = 0; while ((m = MENTION_RE.exec(entry.outbuf)) !== null) { if (m[1].includes('@') || SSH_ALIASES.has(m[1])) best = { host: m[1], root: m[2] }; } }
       if (best) enterRemote(best.host, best.root);
     }
 
