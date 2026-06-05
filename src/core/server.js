@@ -331,7 +331,12 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       onSnapshot: (snap) => {
         remoteSnap = snap;
         broadcast({ type: 'state', payload: snap });
-        if (snap.changed && snap.changed.length) broadcast({ type: 'active', payload: { path: snap.changed[0], id: snap.changed[0] } });
+        if (snap.changed && snap.changed.length) {
+          // Light up each changed/new file (card glows + code streams in) and fly the camera to the newest —
+          // so when the agent writes or creates a file on the remote, the world-tree jumps to that cell.
+          for (const p of snap.changed) broadcast({ type: 'activity', payload: { path: p, action: 'modify', ts: Date.now() } });
+          broadcast({ type: 'active', payload: { path: snap.changed[0], id: snap.changed[0] } });
+        }
       },
       onStatus: (s) => {
         if (s.ok) log(`remote scan: ${s.files} files on ${s.host}:${s.root}`);

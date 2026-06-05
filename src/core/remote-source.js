@@ -125,7 +125,10 @@ export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, 
     const changedPaths = [];
     const cells = files.map((f) => {
       const prev = lastMtime.get(f.rel);
-      const changed = prev !== undefined && f.mtime > prev;
+      // A brand-new file (never seen before, and we've scanned at least once) = the agent just created it →
+      // treat it as a change so the camera flies to it. On the very first scan lastMtime is empty, so nothing flags.
+      const isNew = prev === undefined && lastMtime.size > 0;
+      const changed = isNew || (prev !== undefined && f.mtime > prev);
       if (changed) changedPaths.push({ path: f.rel, mtime: f.mtime });
       const slash = f.rel.indexOf('/');
       return {
