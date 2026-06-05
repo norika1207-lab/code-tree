@@ -65,7 +65,8 @@
     "app": "electron .",
     "gui": "node bin/codetree.js",
     "dist": "bash scripts/build-mac.sh",
-    "dist:dir": "electron-builder --mac dir"
+    "dist:dir": "electron-builder --mac dir",
+    "release": "bash scripts/release.sh"
   },
   "build": {
     "appId": "com.norika.codetree",
