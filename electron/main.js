@@ -44,6 +44,17 @@ async function pickProject() {
 
 // Watch root for no-project mode: an empty folder owned by the app. The visualization watches it (empty, light),
 // while the terminal opens in the home directory and works as usual. Avoids recursively scanning all of home.
+// A root is safe to open as a "project" only if it isn't the home dir, '/Users', or a volume root —
+// watching those recursively saturates the file watcher and hangs the app. (See core attachWatcher guard.)
+function isSafeRoot(p) {
+  if (!p) return false;
+  const abs = path.resolve(p);
+  const home = os.homedir();
+  if (abs === home || abs === path.dirname(home) || abs === path.parse(abs).root) return false;
+  if (home.startsWith(abs + path.sep)) return false; // an ancestor of home (e.g. /Users)
+  return true;
+}
+
 function scratchRoot() {
   const dir = path.join(app.getPath('userData'), 'no-project');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -59,7 +70,7 @@ function startOn(root, opts = {}) {
     remote: opts.remote || null,
   });
   logln('core webPort', core.webPort, 'wsPort', core.port);
-  if (opts.remember !== false) savePrefs({ lastProject: root });   // only remember real projects, not the no-project scratch
+  if (opts.remember !== false && isSafeRoot(root)) savePrefs({ lastProject: root });   // remember only real, safe project roots (never home/scratch)
   return core;
 }
 
@@ -197,6 +208,8 @@ app.whenReady().then(async () => {
   const envRoot = process.env.CODE_TREE_ROOT;
   let root = envRoot && fs.existsSync(envRoot) ? envRoot
     : (prefs.lastProject && fs.existsSync(prefs.lastProject) ? prefs.lastProject : null);
+  // Drop an over-broad remembered root (e.g. the home dir) so we never reopen into a watcher-saturating hang.
+  if (root && !isSafeRoot(root)) { logln('ignoring over-broad lastProject root:', root); savePrefs({}); root = null; }
   if (root) { openProjectFlow(root); return; }
   // First run / no remembered project: do NOT wall the user behind a native picker (that's a button, and it kept
   // dropping people into the empty no-project scratch → a permanently blank tree). Open straight into follow mode:

@@ -188,7 +188,9 @@
   // Each tab owns its own xterm + a sessionId; the shell runs on the core side (one node-pty per sessionId).
   const TERM_OPTS = {
     fontFamily: '"SF Mono",ui-monospace,Menlo,Monaco,monospace',
-    fontSize: 13, lineHeight: 1.25, cursorBlink: true,
+    fontSize: 13, lineHeight: 1.2, cursorBlink: true,
+    scrollback: 5000, // keep a deep history so you can scroll back up to code that already ran
+    scrollOnUserInput: true,
     theme: { background:'#05080e', foreground:'#eaf1fb', cursor:'#4dffb0',
       black:'#0b0f17', green:'#4dffb0', yellow:'#ffcf4d', red:'#ff6b81',
       blue:'#7fb2ff', cyan:'#86e0ff', white:'#cfe0ff' },
@@ -225,6 +227,10 @@
   function startTab(t){
     if (t.started) return;
     fitActive();
+    // Anchor the prompt to the BOTTOM edge: pre-fill the screen so the shell's first prompt lands at the
+    // bottom, and subsequent output flows up from there (a real terminal sitting at the bottom), instead of
+    // stranding the prompt mid-screen with a field of empty rows below it.
+    try { const r = (t.term.rows || 24) - 1; if (r > 0) t.term.write('\n'.repeat(r)); } catch {}
     send({ type:'pty_start', sessionId:t.id, cols:t.term.cols||80, rows:t.term.rows||24 });
     t.started = true;
   }

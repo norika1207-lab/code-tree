@@ -237,6 +237,18 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
 
   function attachWatcher() {
     ready = false;
+    // Safety net: never recursively watch the home directory, '/Users', or a volume root. chokidar would try
+    // to traverse hundreds of thousands of files and saturate the event loop — the web server stops responding
+    // and the app window never loads. Leave the tree empty but the app alive; cwd-follow repoints it the
+    // moment the shell cd's into a real project.
+    const HOME = os.homedir();
+    if (root === HOME || root === path.dirname(HOME) || path.resolve(root) === path.parse(path.resolve(root)).root) {
+      log('refusing to watch an over-broad root (', root, ') — cd into a project and the tree grows there');
+      ready = true;
+      watcher = null;
+      pushState();
+      return;
+    }
     ensureEngineLib(root); // runs on first start and on every reroot (cd into a new project)
     watcher = chokidar.watch(root, {
       ignored: (p) => isIgnored(p), // chokidar v4: ignored takes a function, no longer a glob
