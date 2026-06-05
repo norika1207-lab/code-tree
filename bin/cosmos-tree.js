@@ -570,7 +570,18 @@ function App() {
     h(Text, { color: 'gray' }, '[Enter] send　[Tab] ' + (view === 'split' ? 'open full tree' : 'back to flow') + '　[Ctrl+L] clear tokens　[Ctrl+C] exit')
   );
 
-  return h(Box, { flexDirection: 'column', paddingX: 1 }, header, subhead, view === 'split' ? splitView() : treeView(), footer);
+  // Fill the terminal height and anchor the conversation + input to the BOTTOM (chat-style: content grows
+  // upward, the command line sits at the very bottom), instead of bunching everything at the top.
+  const rows = process.stdout.rows || 30;
+  return h(
+    Box,
+    { flexDirection: 'column', height: rows, paddingX: 1 },
+    header,
+    subhead,
+    h(Box, { flexGrow: 1 }), // elastic spacer pushes the conversation + input down to the bottom
+    view === 'split' ? splitView() : treeView(),
+    footer
+  );
 }
 
 render(h(App));
