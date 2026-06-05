@@ -495,6 +495,13 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     });
   }
 
+  // Known ssh aliases from ~/.ssh/config — used to validate `alias:/path` mentions before auto-following.
+  const SSH_ALIASES = new Set();
+  try {
+    const cfg = fs.readFileSync(path.join(os.homedir(), '.ssh', 'config'), 'utf8');
+    for (const m of cfg.matchAll(/^\s*Host\s+(.+)$/gim)) for (const h of m[1].trim().split(/\s+/)) if (h && !h.includes('*')) SSH_ALIASES.add(h);
+  } catch {}
+
   // ── WebSocket: CLI, visualization, and terminal all connect here ──
   wss.on('connection', (ws) => {
     clients.add(ws);
@@ -565,14 +572,26 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       if (entry.sshTarget && data.includes('\x04')) { entry.sshTarget = null; entry.outbuf = ''; exitRemote(); }
       if (entry.inbuf.length > 400) entry.inbuf = entry.inbuf.slice(-400);
     }
-    // Watch output for the remote prompt's cwd → follow that project. The remote-source polls over its own
-    // ssh, independent of this interactive session, so a flaky disconnect doesn't drop the tree.
+    // An agent (e.g. claude) running in the terminal does its own ssh internally — we never see a shell prompt,
+    // but it usually prints the target like `sportverse:/opt/vidgen` or `root@1.2.3.4:/opt/vidgen`. Follow that.
+    // Only honour a host that's a real ssh alias (from ~/.ssh/config) or a user@host form, so we don't chase
+    // random `word:/path` strings. URLs (http://…:port/) don't match because the host can't start with a digit.
+    const MENTION_RE = /(?:^|[\s"'`([])((?:[a-z_][\w.-]{0,30}@)?[a-z_][\w.-]{1,40}):(\/(?:opt|home|srv|root|var|app|Users|workspace|data|projects)[\w./-]*)/gi;
     function detectRemoteFromOutput(entry, data) {
-      if (!entry.sshTarget) return;
-      entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-1500);
-      const last = entry.outbuf.split('\n').pop();
-      const p = PROMPT_RE.exec(last || '');
-      if (p && p[3].startsWith('/')) enterRemote(entry.sshTarget, p[3]); // cd'd into a real remote dir → follow it
+      entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-2000);
+      // (a) you ssh'd in OUR shell → follow the remote prompt's cwd
+      if (entry.sshTarget) {
+        const last = entry.outbuf.split('\n').pop();
+        const p = PROMPT_RE.exec(last || '');
+        if (p && p[3].startsWith('/')) { enterRemote(entry.sshTarget, p[3]); return; }
+      }
+      // (b) the agent printed a remote target → follow it (the ssh happened inside the agent, not our shell)
+      let m, best = null; MENTION_RE.lastIndex = 0;
+      while ((m = MENTION_RE.exec(entry.outbuf)) !== null) {
+        const host = m[1], root = m[2];
+        if (host.includes('@') || SSH_ALIASES.has(host)) best = { host, root };
+      }
+      if (best) enterRemote(best.host, best.root);
     }
 
     ws.on('message', (raw) => {
