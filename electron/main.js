@@ -191,9 +191,10 @@ function buildMenu() {
 
 app.whenReady().then(async () => {
   logln('app ready, userData=', app.getPath('userData'));
-  // Fire up the bundled on-device model (llama-server + bragi proxy) in the background. Non-blocking and
-  // non-fatal: local-detect.js picks it up on :8080 once ready; if the model is missing we just log and skip.
-  startBragi({ resourcesPath: process.resourcesPath, execPath: process.execPath, logln });
+  // The in-app agent uses a cloud model (Claude via the borrowed Claude Code login by default). The bundled
+  // on-device model is disabled — keep the app small and rely on a real cloud LLM. (startBragi left importable
+  // for users who still run the local stack manually via the `bragi` command.)
+  void startBragi;
   buildMenu();
   createWindow();
   // show a welcome screen first to avoid a blank window
