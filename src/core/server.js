@@ -620,17 +620,6 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     function detectRemoteFromOutput(entry, data) {
       const clean = data.replace(ANSI, '');
       entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-4000);
-      // An in-terminal agent (claude) tried an INTERACTIVE ssh but its sandboxed Bash has no TTY, so ssh prints
-      // "Pseudo-terminal will not be allocated…" and gives up. Code Tree's own terminal IS a real TTY — open a
-      // working interactive ssh to that host in a fresh tab for the user, automatically. (debounced per host)
-      if (/Pseudo-terminal will not be allocated/.test(entry.outbuf)) {
-        const sm = entry.outbuf.match(/\bssh\s+(?:-\S+\s+)*([a-zA-Z_][\w.@-]+)/);
-        const h = sm && sm[1];
-        if (h && (h.includes('@') || SSH_ALIASES.has(h)) && entry._sshOffered !== h) {
-          entry._sshOffered = h; entry.outbuf = '';
-          broadcast({ type: 'open_ssh', payload: { host: h } });
-        }
-      }
       lieAgentBuf += clean; if (lieAgentBuf.length > 12000) lieAgentBuf = lieAgentBuf.slice(-12000); // feed the agent's output to the lie monitor
       draftStream.feed(clean); // and to the live draft-cell watcher: code on screen → unnamed cell → named on save
       // (a) precise: you ssh'd in OUR shell → follow the remote prompt's cwd
