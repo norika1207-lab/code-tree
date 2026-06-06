@@ -51,6 +51,9 @@
   /* Collapsed file: a small glowing leaf dot; click it to expand into a card */
   .dotc { cursor:pointer; }
   .dotlabel { font-size:12px; fill:#aebfd9; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; cursor:pointer; }
+  .filebox { transition:stroke .18s, filter .18s; }
+  .dot:hover .filebox { fill:#142033; stroke:#8fd9ff; }
+  .boxlabel { font-size:12px; fill:#cfe0ff; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; pointer-events:none; }
 
   /* File = a code-editor window tile */
   .fcard { width:210px; height:152px; border-radius:9px; overflow:hidden; cursor:pointer;
@@ -525,24 +528,25 @@
       else { if(!pre.textContent) pre.textContent='…'; fetchContent(path, txt=>{ if(!pre._tw) pre.textContent=clip(txt); }); }
     });
 
-    // ── Collapsed files → small leaf dots (click to pin as a card and open) ──
+    // ── Each file = a small labelled BOX (not a dot) — every file is a 框框 in the nested tree ──
+    const BOX_W=176, BOX_H=34;
     const dn=gDots.selectAll('g.dot').data(placedDots, p=>'d:'+p.cell.path);
     dn.exit().remove();
-    const den=dn.enter().append('g').attr('class','dot');
-    den.append('circle').attr('class','dotc').attr('r',5)
-      .on('click',(e,p)=>{ manualExpand.add(p.cell.path);
-        const um=userMoved; userMoved=true; render(lastCells); userMoved=um; openCell(p.cell.path); })
+    const den=dn.enter().append('g').attr('class','dot').style('cursor','pointer')
+      .on('click',(e,p)=>{ manualExpand.add(p.cell.path); const um=userMoved; userMoved=true; render(lastCells); userMoved=um; openCell(p.cell.path); })
       .on('mouseenter',(e,p)=>highlightBlast(p.cell.path))
       .on('mouseleave',clearBlast);
-    // filename to the RIGHT of the dot, so each file reads as one indented line in the outline
-    den.append('text').attr('class','dotlabel').attr('x',11).attr('y',4).attr('text-anchor','start');
+    den.append('rect').attr('class','filebox').attr('x',0).attr('y',-BOX_H/2).attr('width',BOX_W).attr('height',BOX_H).attr('rx',7);
+    den.append('circle').attr('class','boxdot').attr('cx',13).attr('cy',0).attr('r',4);
+    den.append('text').attr('class','boxlabel').attr('x',25).attr('y',4).attr('text-anchor','start');
     const dall=den.merge(dn);
     dall.attr('class',p=>'dot'+(defocused(p.cell.path)?' defocus':''));
     dall.attr('transform',p=>`translate(${p.x},${p.y})`);
-    dall.select('circle.dotc').attr('fill',p=>statusColor(p.cell))
-      .attr('stroke','#060a12').attr('stroke-width',1.5)
+    dall.select('rect.filebox')
+      .attr('fill','#0e1626').attr('stroke',p=>statusColor(p.cell)).attr('stroke-width',1.5)
       .attr('filter',p=>(p.cell.path===activePath||p.cell.status==='active')?'url(#leafglow)':null);
-    dall.select('text.dotlabel').text(p=>p.cell.path.split('/').pop()).on('click.dot',(e,p)=>openCell(p.cell.path));
+    dall.select('circle.boxdot').attr('fill',p=>statusColor(p.cell));
+    dall.select('text.boxlabel').text(p=>{ const n=p.cell.path.split('/').pop(); return n.length>20?n.slice(0,19)+'…':n; });
 
     if(!userMoved || cells.length!==lastLeafCount){ fitToView(); }
     lastLeafCount=cells.length;

@@ -565,11 +565,18 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       // and the like), so claude and brew-installed tools give "command not found" and seem unresponsive. Open with a login shell (-l)
       // so it sources the user's .zprofile / .zshrc and restores the full PATH. VS Code and Hyper do the same.
       const loginArgs = /\/(zsh|bash|sh|fish)$/.test(shell) ? ['-l'] : [];
-      const pty = mod.spawn(shell, loginArgs, {
-        name: 'xterm-color',
-        cols: cols || 80, rows: rows || 24,
-        cwd: shellCwd, env: process.env,
-      });
+      // node-pty's spawn-helper can be blocked by macOS (Gatekeeper/hardened-runtime after an ad-hoc re-sign),
+      // throwing "posix_spawnp failed". That must NOT kill the whole core (which would blank the command line and
+      // the tree). Catch it, tell the page the terminal is unavailable, and keep the visualization alive.
+      let pty;
+      try {
+        const cwdSafe = (() => { try { return fs.existsSync(shellCwd) && fs.statSync(shellCwd).isDirectory() ? shellCwd : os.homedir(); } catch { return os.homedir(); } })();
+        pty = mod.spawn(shell, loginArgs, { name: 'xterm-color', cols: cols || 80, rows: rows || 24, cwd: cwdSafe, env: process.env });
+      } catch (e) {
+        log('pty spawn failed (terminal unavailable, tree still works):', e && e.message);
+        try { ws.send(JSON.stringify({ type: 'pty_missing' })); } catch {}
+        return;
+      }
       // Each tab records its own transcript.
       const slog = createSessionLogger({ root, label: projLabel });
       const entry = { pty, slog, sshTarget: null, outbuf: '', inbuf: '' };
