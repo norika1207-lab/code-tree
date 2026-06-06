@@ -539,6 +539,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   wss.on('connection', (ws) => {
     clients.add(ws);
     ws.send(JSON.stringify({ type: 'state', payload: currentSnapshot() }));
+    // Also tell a freshly-connected client WHICH project we're on, so its header/label isn't stuck on
+    // "no project" when we're already following a remote (the tree arrives via the state above).
+    if (remote) ws.send(JSON.stringify({ type: 'project', payload: { root: `${remote.host}:${remote.root}`, label: `${remote.host}:${remote.root.split('/').pop()}`, remote: true } }));
+    else ws.send(JSON.stringify({ type: 'project', payload: { root, label: projLabel } }));
     ws.send(JSON.stringify({ type: 'tokens', payload: tokensSnapshot() }));
     // One connection can hold several independent shells (tabs). Each is keyed by a sessionId from the page.
     const ptys = new Map(); // sessionId → { pty, slog, sshTarget, outbuf }

@@ -20,6 +20,10 @@ function logln(...a) {
 }
 process.on('uncaughtException', (e) => logln('UNCAUGHT', e && e.stack || e));
 process.on('unhandledRejection', (e) => logln('UNHANDLED', e && e.stack || e));
+// Core (server.js) runs IN this main process and logs via console.log. From a Finder launch that output
+// goes nowhere, which blinds us to whether remote detection/scan actually fired. Route it into codetree.log.
+console.log = (...a) => logln('[core]', ...a.map((x) => (typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })())));
+console.error = (...a) => logln('[core:err]', ...a.map(String));
 
 let core = null;
 let win = null;
