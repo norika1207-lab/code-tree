@@ -30,7 +30,15 @@ function loginEnv() {
   return _loginEnv;
 }
 
-const CODE_EXT = ['js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'py', 'go', 'rb', 'rs', 'java', 'php', 'c', 'h', 'cpp', 'hpp'];
+// Mirror the WHOLE project, not just code — same philosophy as config.js CODE_EXT (code + markup + config +
+// docs + scripts). Binary/asset files stay out so the tree shows structure, not a wall of .png nodes.
+const CODE_EXT = [
+  'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'py', 'go', 'rb', 'rs', 'java', 'php', 'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'swift', 'kt', 'scala', 'lua', 'r', 'jl', 'dart',
+  'html', 'htm', 'css', 'scss', 'sass', 'vue', 'svelte', 'svg',
+  'json', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'xml', // NOT env — never preview .env secrets
+  'md', 'mdx', 'rst', 'txt',
+  'sh', 'bash', 'zsh', 'sql', 'gradle',
+];
 const LANG = { js: 'js', jsx: 'jsx', mjs: 'js', cjs: 'js', ts: 'ts', tsx: 'tsx', py: 'py', go: 'go', rb: 'rb', rs: 'rs', java: 'java', php: 'php' };
 const MARK = '@@CT_FILE@@';
 const MAX_FILES = 4000;

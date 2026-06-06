@@ -851,11 +851,21 @@
   let stateCells=[];                 // the last scanned project snapshot
   const draftMap=new Map();          // draftId → live draft cell
   let draftSeq=900000;               // born_seq high so drafts sort to the newest tier
-  function composeCells(){
+  let draftRoot=null;                // which project the current drafts belong to
+  // Drop a draft once the real scan owns its path (file saved + scanned), or if it's a bound draft that no scan
+  // ever confirmed within 20s (a stale/foreign path — e.g. a /tmp test file, or a remote file the scan filters out).
+  function pruneDrafts(){
     const have=new Set(stateCells.map(c=>c.path));
-    const drafts=[...draftMap.values()].filter(d=> !(d.bound && have.has(d.path)));
-    return stateCells.concat(drafts);
+    const now=performance.now();
+    for(const [id,d] of [...draftMap]){
+      const real=have.has(d.path);
+      const stale=d.bound && (now-(d.boundAt||0) > 20000) && !real;
+      if(real || stale){ contentByPath.delete(d.path); bdEls.delete(d.path); draftMap.delete(id); }
+    }
   }
+  function clearDrafts(){ for(const d of draftMap.values()){ contentByPath.delete(d.path); bdEls.delete(d.path); } draftMap.clear(); }
+  function composeCells(){ pruneDrafts(); return stateCells.concat([...draftMap.values()]); }
+  setInterval(()=>{ if(draftMap.size){ const before=draftMap.size; pruneDrafts(); if(draftMap.size!==before) redrawWithDrafts(); } }, 5000);
   function redrawWithDrafts(){ lastCells=composeCells(); const um=userMoved; userMoved=true; render(lastCells, lastEdges); userMoved=um; }
   function onDraft(e){
     if(e.op==='open'){
@@ -878,7 +888,7 @@
       // dedupe: if another draft already claimed this filename (e.g. the agent's tool line echoed twice), drop it
       for(const [k,d] of draftMap){ if(k!==e.id && d.path===name){ contentByPath.delete(d.path); bdEls.delete(d.path); draftMap.delete(k); } }
       const code=contentByPath.get(old)||''; contentByPath.delete(old); contentByPath.set(name, code);
-      cell.path=name; cell.id='draft:'+name; cell.bound=true;
+      cell.path=name; cell.id='draft:'+name; cell.bound=true; cell.boundAt=performance.now();
       const slash=name.indexOf('/'); cell.category= slash>0 ? name.slice(0,slash) : 'root';
       bdEls.delete(old);
       redrawWithDrafts(); setActive(name);
@@ -899,7 +909,9 @@
     ws.onmessage=ev=>{
       let m; try{ m=JSON.parse(ev.data);}catch{ return; }
       if(m.type==='state'){
-        if(m.payload && m.payload.root){ const r=m.payload.root.split('/').filter(Boolean); projectName=r[r.length-1]||'Project'; }
+        const root=m.payload&&m.payload.root||null;
+        if(root){ const r=root.split('/').filter(Boolean); projectName=r[r.length-1]||'Project'; }
+        if(root!==draftRoot){ clearDrafts(); draftRoot=root; }  // switched project → old drafts are irrelevant
         stateCells=(m.payload&&m.payload.cells)||[];
         if(m.payload&&m.payload.edges) lastEdges=m.payload.edges;
         lastCells=composeCells(); render(lastCells, lastEdges);
