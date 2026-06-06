@@ -94,6 +94,13 @@ ck('neg: package version', `installed torch:2.11 cuda:13`, { host: null });
 ck('neg: random alias-looking', `myvar:/opt/notreal mentioned`, { host: null }); // myvar not an alias
 ck('neg: url in ssh-looking text', `see https://web1:8030/opt/page`, { host: null });
 
+// ---------- L. system paths must never be followed (login MOTD, /etc, …) ----------
+ck('motd log path not followed', `Bash(ssh sportverse)\nWelcome to Ubuntu\nsee /var/log/unattended-upgrades/unattended-upgrades.log for details`, { host: null });
+ck('ssh cd to /var/log ignored', `Bash(ssh sportverse "cd /var/log && tail syslog")`, { host: null });
+ck('edit /etc not a project', `Edit(/etc/nginx/nginx.conf)`, { host: null, root: null });
+ck('local cd /tmp ignored', `cd /tmp && ls`, { host: null, root: null });
+ck('usr bin not a project', `Read(/usr/local/bin/thing.sh)`, { host: null, root: null });
+
 console.log(`\n=== agent-trace: ${pass} pass / ${fail} fail (of ${pass + fail}) ===`);
 for (const f of fails) console.log('  ✗', f.name, '\n     got ', JSON.stringify(f.got), '\n     want', JSON.stringify(f.want));
 process.exit(fail ? 1 : 0);

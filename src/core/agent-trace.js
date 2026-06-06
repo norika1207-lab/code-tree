@@ -22,6 +22,9 @@ const ABSPATH = `(?:~|/)[\\w./@+-]*`;
 // Directories we treat as plausible project roots when inferring from file paths.
 const ROOT_HINTS = /(?:^|\/)(?:opt|home|srv|root|var\/www|app|apps|workspace|projects|code|repos|Users\/[^/]+\/(?:Documents|Desktop|Dropbox|dev|src|code|projects))(?:\/|$)/;
 
+// System directories that are never a "project" — don't follow login MOTD log paths, /etc, /usr, etc.
+const SYS_PREFIX = /^\/(?:var(?!\/www)|etc|usr(?!\/local\/src)|proc|sys|dev|run|tmp|boot|lib|lib64|bin|sbin|snap)(?:\/|$)/;
+
 function stripAnsi(s) { return String(s || '').replace(ANSI, ''); }
 
 function dirOf(p) { const i = p.lastIndexOf('/'); return i <= 0 ? '/' : p.slice(0, i); }
@@ -130,6 +133,9 @@ export function traceProject(rawBuf, opts = {}) {
   // ---- assemble touched (remote-context files first, then tool files) ----
   for (const f of remoteFiles) pushTouched(f);
 
+  // Never treat a system directory (MOTD log paths, /etc, /usr …) as a project to follow.
+  if (remoteRoot && SYS_PREFIX.test(remoteRoot)) remoteRoot = null;
+
   if (remoteHost && remoteRoot) {
     return { host: remoteHost, root: remoteRoot.replace(/\/$/, '') || '/', touched, cwd, source: source || 'ssh' };
   }
@@ -139,5 +145,6 @@ export function traceProject(rawBuf, opts = {}) {
     const pool = touched.length ? touched : bareFiles;
     if (pool.length) localRoot = toProjectRoot(commonDir(pool));
   }
+  if (localRoot && SYS_PREFIX.test(localRoot)) localRoot = null;
   return { host: null, root: localRoot ? localRoot.replace(/\/$/, '') || '/' : null, touched, cwd, source: source || (localRoot ? 'local-infer' : 'none') };
 }

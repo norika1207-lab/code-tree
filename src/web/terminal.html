@@ -221,6 +221,7 @@
       blue:'#7fb2ff', cyan:'#86e0ff', white:'#cfe0ff' },
   };
   const tabs = [];           // { id, term, fit, pane, btn, started }
+  const openedSsh = new Set(); // hosts we've already auto-opened an interactive ssh tab for
   let activeId = null, seq = 0;
   const wrap = document.getElementById('termwrap');
   const rail = document.getElementById('tabrail');
@@ -344,6 +345,17 @@
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === 'pty_output') { getTab(m.sessionId)?.term.write(m.data); }
       else if (m.type === 'pty_missing') document.getElementById('need').classList.add('show');
+      else if (m.type === 'open_ssh' && m.payload && m.payload.host) {
+        // claude couldn't open an interactive ssh (no TTY in its sandbox). We have a real TTY — open one for real.
+        const host = String(m.payload.host).replace(/[^\w.@:-]/g, '');
+        if (host && !openedSsh.has(host)) {
+          openedSsh.add(host);
+          const t = makeTab();
+          try { t.term.write('\x1b[90m  opening a real interactive ssh to \x1b[36m'+host+'\x1b[90m for you …\x1b[0m\r\n'); } catch {}
+          const fire = () => { if (t.started) send({ type:'pty_input', sessionId:t.id, data:'ssh '+host+'\r' }); else setTimeout(fire, 200); };
+          setTimeout(fire, 500);
+        }
+      }
       else if (m.type === 'pty_exit') { const t=getTab(m.sessionId); if(t){ t.term.write('\r\n\x1b[90m[shell exited]\x1b[0m\r\n'); t.btn.classList.add('dead'); } if(m.sessionId===activeId) setRec(null); }
       else if (m.type === 'session_log' && m.payload) {
         // Once the CLI is open it records the full transcript; light up REC and put the save path in the tooltip
