@@ -50,7 +50,7 @@
   .rootlabel { font-size:13px; font-weight:700; fill:#6b7d99; letter-spacing:1px; paint-order:stroke; stroke:#060a12; stroke-width:3px; pointer-events:none; }
   /* Collapsed file: a small glowing leaf dot; click it to expand into a card */
   .dotc { cursor:pointer; }
-  .dotlabel { font-size:10px; fill:#9fb4d6; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; pointer-events:none; }
+  .dotlabel { font-size:12px; fill:#aebfd9; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; cursor:pointer; }
 
   /* File = a code-editor window tile */
   .fcard { width:210px; height:152px; border-radius:9px; overflow:hidden; cursor:pointer;
@@ -394,29 +394,56 @@
 
   const COL_W = CARD_W + 70;     // Horizontal spacing between cards in the same tier
   const TIER_H = CARD_H + 160;   // Vertical spacing between tiers
+  const INDENT = 34;             // horizontal indent per folder depth (file-explorer outline)
+  const ROW_H = 46;              // vertical spacing per row (one row per file/folder)
   const TIER_GAP = 140;          // Distance from the trunk top to the first tier
   let lastPlaced = null, lastEdges = [];
 
-  // Tier by "functional category": same category, same tier; the more files depend on a category, the lower it sits (closer to the trunk)
-  function layout(cells, edges){
-    const idToCat = new Map(cells.map(c=>[c.id, c.category||'root']));
-    const byCat = new Map();
-    for(const c of cells){ const k=c.category||'root'; (byCat.get(k)||byCat.set(k,[]).get(k)).push(c); }
-    const imp = new Map(); for(const k of byCat.keys()) imp.set(k,0);
-    for(const e of (edges||[])){ const tc=idToCat.get(e.to); if(tc!=null) imp.set(tc,(imp.get(tc)||0)+1); }
-    // Tier 0 at the bottom (most foundational / most depended-on); higher up is more peripheral
-    const cats = [...byCat.keys()].sort((a,b)=> (imp.get(b)-imp.get(a)) || a.localeCompare(b));
+  // Nested folder tree: mirror the actual directory structure (the way a file explorer / the ASCII tree does).
+  // Root at top; every folder branches down to its sub-folders and files; files are the leaves (cards/dots).
+  // x = tidy in-order position over the leaves; y = directory depth. Parent→child links show the nesting.
+  const DOT_COL = 74;            // a collapsed file (dot) takes a narrow column; a card takes a wide one
+  function layout(cells, edges, exp){
+    const isCard=p=> !exp || exp.has(p);   // null exp = expand all
     const order = [...cells].sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq));
     const oi = new Map(order.map((c,i)=>[c.id,i]));
-    const placed=[], catMeta=new Map();
-    cats.forEach((cat,ti)=>{
-      const arr = byCat.get(cat).slice().sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq));
-      const n=arr.length, y=-(TIER_GAP+ti*TIER_H);
-      arr.forEach((c,i)=> placed.push({ cell:c, cat, tier:ti, x:(i-(n-1)/2)*COL_W, y, oi:oi.get(c.id)||0 }));
-      catMeta.set(cat, { y, minX:-(n-1)/2*COL_W });
-    });
-    return { placed, cats, catMeta };
+    // Build the directory hierarchy from the file paths.
+    const nodes=new Map();  // key → node
+    function node(key, name, depth, isDir){ let n=nodes.get(key); if(!n){ n={key,name,depth,isDir,children:[],cell:null,x:0,y:0}; nodes.set(key,n);} return n; }
+    const root=node('', projectName||'root', 0, true);
+    for(const c of cells){
+      const parts=String(c.path).split('/').filter(Boolean);
+      let parentKey='', parent=root;
+      for(let i=0;i<parts.length;i++){
+        const isLast=i===parts.length-1;
+        const key=(parentKey?parentKey+'/':'')+parts[i];
+        const n=node(key, parts[i], i+1, !isLast);
+        if(!parent.children.includes(n)) parent.children.push(n);
+        if(isLast){ n.isDir=false; n.cell=c; n.oi=oi.get(c.id)||0; }
+        parentKey=key; parent=n;
+      }
+    }
+    // Sort each folder's children: sub-folders first, then files; alphabetical — stable, explorer-like.
+    for(const n of nodes.values()) n.children.sort((a,b)=> (b.isDir-a.isDir) || a.name.localeCompare(b.name));
+    // Indented file-explorer / ASCII-tree shape: every folder and file gets its own ROW (pre-order, parent before
+    // its children), and indents to the right by its depth. Reads top-to-bottom exactly like `tree` output.
+    let row=0; let maxDepth=0;
+    (function place(n){
+      maxDepth=Math.max(maxDepth, n.depth);
+      n.x=n.depth*INDENT; n.y=row*ROW_H; row++;
+      n.children.forEach(place);
+    })(root);
+    const placed=[], dirs=[], links=[];
+    for(const n of nodes.values()){
+      if(n.key==='') { dirs.push(n); continue; }
+      if(n.isDir) dirs.push(n); else placed.push({ cell:n.cell, tier:n.depth, x:n.x, y:n.y, oi:n.oi||0 });
+    }
+    // Parent→child connectors for every node (including root → its top-level entries).
+    for(const n of nodes.values()) for(const ch of n.children) links.push({ s:n, t:ch });
+    return { placed, dirs, links, root, maxDepth };
   }
+  // A smooth vertical elbow from a parent node down to a child node.
+  function linkPath(sx,sy,tx,ty){ const my=(sy+ty)/2; return `M${sx},${sy} C${sx},${my} ${tx},${my} ${tx},${ty}`; }
 
   function render(cells, edges){
     const emptyEl=document.getElementById('empty');
@@ -430,52 +457,37 @@
     depMap=new Map(); // rel(depended-on file) -> Set(files that import it and break if it breaks)
     for(const e of lastEdges){ const f=relById.get(e.from), t=relById.get(e.to);
       if(f&&t){ if(!depMap.has(t)) depMap.set(t,new Set()); depMap.get(t).add(f); } }
-    const { placed, cats, catMeta } = layout(cells, lastEdges);
+    // Level of detail first (which files are cards vs dots), so layout can give dots a narrow column.
+    const exp=buildExpanded(cells);
+    const { placed, dirs, links } = layout(cells, lastEdges, exp);
     lastPlaced=placed;
     placed.forEach(p=>posByPath.set(p.cell.path,{x:p.x,y:p.y}));
-    // Level of detail: which grow into cards, which collapse into dots
-    const exp=buildExpanded(cells);
     const isExp=p=> exp===null || exp.has(p.cell.path);
     const placedCards=placed.filter(isExp);
     const placedDots=placed.filter(p=>!isExp(p));
     const focusSet=focusOf();
     const defocused=path=> activePath && !focusSet.has(path);  // When there's a focus, unrelated tiles fade back
-    const topY = Math.min(...placed.map(p=>p.y));
-    const maxY = Math.max(...placed.map(p=>p.y));  // Bottom tier (the most core one)
-    const yGround = maxY + 64;                      // Origin: just below the bottom tier, no empty tail trailing off
 
-    // ── Origin (seed) → trunk → central spine (threading up through every tier) ──
-    // Trunk: a short run from the origin up to the bottom tier, with no dangling tail
-    gTrunk.selectAll('path.trunk').data([0]).join(en=>en.append('path').attr('class','trunk'),u=>u,x=>x.remove())
-      .attr('d',`M0,${yGround} L0,${maxY}`).attr('fill','none').attr('stroke','#33415c')
-      .attr('stroke-width',3).attr('stroke-linecap','round').attr('stroke-opacity',.9);
-    gTrunk.selectAll('path.spine').data([0]).join(en=>en.append('path').attr('class','spine'),u=>u,x=>x.remove())
-      .attr('d',`M0,${maxY} L0,${topY}`).attr('fill','none').attr('stroke','#2c3950')
-      .attr('stroke-width',2).attr('stroke-linecap','round').attr('stroke-opacity',.7);
-    // Seed: the origin of the whole tree, where the earliest code sprouts from
-    gTrunk.selectAll('circle.seed').data([0]).join(en=>en.append('circle').attr('class','seed'),u=>u,x=>x.remove())
-      .attr('cx',0).attr('cy',yGround).attr('r',5)
-      .attr('fill','#1a2436').attr('stroke','#4a5b7a').attr('stroke-width',1.5);
-    gTrunk.selectAll('text.seedlabel').data([0]).join(en=>en.append('text').attr('class','seedlabel'),u=>u,x=>x.remove())
-      .attr('text-anchor','middle').attr('x',0).attr('y',yGround+24)
-      .attr('fill','#5f7090').attr('font-size',11).attr('letter-spacing',1).text('root');
-    // Category name: labeled on the left of each tier
-    const cl=gTrunk.selectAll('text.catlabel').data(cats, d=>d);
-    cl.exit().remove();
-    cl.enter().append('text').attr('class','catlabel').merge(cl)
-      .attr('text-anchor','end')
-      .attr('x',d=>catMeta.get(d).minX - CARD_W/2 - 28)
-      .attr('y',d=>catMeta.get(d).y + 5)
-      .text(d=>d);
-
-    // ── Branches: each card grows out from the central spine (just below its tier) ──
-    const lk=gLinks.selectAll('path').data(placed, p=>'f:'+p.cell.path);
+    // ── Parent→child connectors: right-angle elbows, like a file-explorer / `tree` outline ──
+    // Drop straight down the parent's indent rail, then turn right into each child's row.
+    const lk=gLinks.selectAll('path').data(links, d=>'L:'+d.t.key);
     lk.exit().remove();
     lk.enter().append('path').merge(lk)
-      .attr('d',p=>branchPath({x:0,y:p.y+74},{x:p.x,y:p.y}))
-      .attr('fill','none').attr('stroke','#2c3950').attr('stroke-opacity',.75)
-      .attr('stroke-linecap','round')
-      .attr('stroke-width',p=>Math.max(1.2, 3 - p.tier*0.5));
+      .attr('d',d=>`M${d.s.x},${d.s.y+9} V${d.t.y} H${d.t.x-2}`)
+      .attr('fill','none').attr('stroke','#33415c').attr('stroke-opacity',.8)
+      .attr('stroke-linecap','round').attr('stroke-linejoin','round')
+      .attr('stroke-width',1.4);
+
+    // ── Folder rows: a small node + "name/" to its right, indented at its depth (root = project name) ──
+    const dn2=gTrunk.selectAll('g.dir').data(dirs, d=>'D:'+d.key);
+    dn2.exit().remove();
+    const den2=dn2.enter().append('g').attr('class','dir');
+    den2.append('circle').attr('class','dirc').attr('r',4).attr('fill','#26334a').attr('stroke','#5a6e92').attr('stroke-width',1.5);
+    den2.append('text').attr('class','dirlabel').attr('text-anchor','start').attr('x',11).attr('y',4)
+      .attr('fill','#9fb4d6').attr('font-size',13).attr('font-weight',600).attr('letter-spacing',.3);
+    const dall2=den2.merge(dn2);
+    dall2.attr('transform',d=>`translate(${d.x},${d.y})`);
+    dall2.select('text.dirlabel').text(d=> (d.key==='' ? (projectName||'root') : d.name) + '/');
 
     // ── File = code-editor window tile ──
     const nd=gNodes.selectAll('g.node').data(placedCards, p=>'f:'+p.cell.path);
@@ -500,7 +512,7 @@
     requestAnimationFrame(()=>ent.selectAll('div.fcard').style('opacity',1)); // Trigger the fade-in
 
     const all=ent.merge(nd);
-    all.attr('transform',p=>`translate(${p.x},${p.y})`);
+    all.attr('transform',p=>`translate(${p.x+CARD_W/2+16},${p.y})`); // card sits to the RIGHT of its indent rail
     all.select('div.fcard').attr('class',p=>'fcard'+cardState(p.cell)+(p.oi===0?' first':'')+(defocused(p.cell.path)?' defocus':''));
     all.select('.seq').text(p=>'#'+((p.oi||0)+1));
     all.select('.nm').text(p=>p.cell.path.split('/').pop());
@@ -517,19 +529,20 @@
     const dn=gDots.selectAll('g.dot').data(placedDots, p=>'d:'+p.cell.path);
     dn.exit().remove();
     const den=dn.enter().append('g').attr('class','dot');
-    den.append('circle').attr('class','dotc').attr('r',7)
+    den.append('circle').attr('class','dotc').attr('r',5)
       .on('click',(e,p)=>{ manualExpand.add(p.cell.path);
         const um=userMoved; userMoved=true; render(lastCells); userMoved=um; openCell(p.cell.path); })
       .on('mouseenter',(e,p)=>highlightBlast(p.cell.path))
       .on('mouseleave',clearBlast);
-    den.append('text').attr('class','dotlabel').attr('y',20).attr('text-anchor','middle');
+    // filename to the RIGHT of the dot, so each file reads as one indented line in the outline
+    den.append('text').attr('class','dotlabel').attr('x',11).attr('y',4).attr('text-anchor','start');
     const dall=den.merge(dn);
     dall.attr('class',p=>'dot'+(defocused(p.cell.path)?' defocus':''));
     dall.attr('transform',p=>`translate(${p.x},${p.y})`);
     dall.select('circle.dotc').attr('fill',p=>statusColor(p.cell))
       .attr('stroke','#060a12').attr('stroke-width',1.5)
       .attr('filter',p=>(p.cell.path===activePath||p.cell.status==='active')?'url(#leafglow)':null);
-    dall.select('text.dotlabel').text(p=>p.cell.path.split('/').pop());
+    dall.select('text.dotlabel').text(p=>p.cell.path.split('/').pop()).on('click.dot',(e,p)=>openCell(p.cell.path));
 
     if(!userMoved || cells.length!==lastLeafCount){ fitToView(); }
     lastLeafCount=cells.length;
@@ -605,17 +618,13 @@
     return out;
   }
   function buildExpanded(cells){
-    if(cells.length<=LOD_THRESHOLD) return null;   // null = expand all; small projects don't collapse
+    // Indented outline: by default every file is a one-line dot (the structure), and only the files that matter
+    // right now grow into code cards — the one being written (draft), the active one, recent, hotspots, anomalies,
+    // and anything you clicked. An empty set = a clean all-dots outline (no wall of overlapping cards).
     const exp=new Set(manualExpand);
     if(activePath){ exp.add(activePath); for(const n of neighborsOf(activePath)) exp.add(n); }
     for(let i=0;i<recent.length && i<RECENT_KEEP;i++) exp.add(recent[i]);
-    // Hotspots and anomalies always expand: those are what you should watch most
-    for(const c of cells) if(isHotspot(c) || c.anomaly==='repeat' || c.anomaly==='stall' || c.status==='error') exp.add(c.path);
-    // Not started yet (no focus, no anomaly) → expand the earliest-born few tiles as a front by default, so the first look isn't a field of empty dots
-    if(exp.size===0){
-      const seed=[...cells].sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq)).slice(0,6);
-      for(const c of seed) exp.add(c.path);
-    }
+    for(const c of cells) if(c.draft || isHotspot(c) || c.anomaly==='repeat' || c.anomaly==='stall' || c.status==='error') exp.add(c.path);
     return exp;
   }
   // Focus ring: the active tile + its direct links + the recent trail. Everything else fades back.
@@ -669,21 +678,23 @@
 
   // Don't cram the whole tree into one screen (it would shrink tiles past visibility).
   // Scale on width alone, clamped to a readable range, with the camera anchored at the trunk base (the newest/core tier); scroll up to see higher tiers.
-  const MIN_SCALE = 0.62, MAX_SCALE = 1.0;
+  const MIN_SCALE = 0.08, MAX_SCALE = 1.0;   // allow zooming out far enough to fit a deep/wide nested tree
   function fitToView(){
     if(!lastPlaced || !lastPlaced.length) return;
     const xs=lastPlaced.map(p=>p.x);
-    const x0=Math.min(...xs)-CARD_W/2, x1=Math.max(...xs)+CARD_W/2;
-    const yMax=Math.max(...lastPlaced.map(p=>p.y))+CARD_H/2+90; // Includes the seed origin stretch
-    if(![x0,x1,yMax].every(Number.isFinite)) return;
+    const x0=Math.min(0, Math.min(...xs))-30;                           // root rail on the left
+    const x1=Math.max(...xs)+CARD_W+200;                                // room for a card / filename label to the right
+    const y0=Math.min(0, Math.min(...lastPlaced.map(p=>p.y)))-40;       // root folder at the top (y≈0)
+    const y1=Math.max(...lastPlaced.map(p=>p.y))+CARD_H/2+40;           // deepest file at the bottom
+    if(![x0,x1,y0,y1].every(Number.isFinite)) return;
     const pad=70;
-    const bw=Math.max(1,(x1-x0))+pad*2;
+    const bw=Math.max(1,(x1-x0))+pad*2, bh=Math.max(1,(y1-y0))+pad*2;
     const w=innerWidth||1280, h=innerHeight||800;
-    let s=Math.max(MIN_SCALE, Math.min(MAX_SCALE, w/bw));
+    // Fit the WHOLE nested tree — both width and height — so the root never gets pushed off the top.
+    let s=Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(w/bw, h/bh)));
     if(!Number.isFinite(s) || s<=0) s=1; curScale=s;
-    const cx=(x0+x1)/2;
-    // Center horizontally on the trunk; vertically place the trunk base near the bottom edge, with tiers of tiles growing upward
-    const t=d3.zoomIdentity.translate(w/2 - s*cx, h - s*yMax - 70).scale(s);
+    const cx=(x0+x1)/2, cy=(y0+y1)/2;
+    const t=d3.zoomIdentity.translate(w/2 - s*cx, h/2 - s*cy).scale(s);
     svg.call(zoom.transform, t);
     repaintCards();
   }
