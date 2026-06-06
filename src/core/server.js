@@ -80,6 +80,15 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   };
   const webServer = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://localhost');
+    // Bundled front-end libraries (xterm, d3) served locally so the app works fully offline — no CDN.
+    if (u.pathname.startsWith('/vendor/')) {
+      const name = path.basename(u.pathname); // no traversal
+      const file = path.join(WEB_DIR, 'vendor', name);
+      const mime = name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'text/javascript' : 'application/octet-stream';
+      try { res.writeHead(200, { 'content-type': mime + '; charset=utf-8', 'cache-control': 'max-age=31536000' }); res.end(fs.readFileSync(file)); }
+      catch (e) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('vendor not found'); }
+      return;
+    }
     // Full visualization view (the iframe to the right of the terminal loads this; can also be opened standalone)
     if (u.pathname === '/viz') { serveHtml(res, HTML_PATH, 'cosmos.html'); return; }
     // /file?path=rel → return a single file's content (click a cell to drill in and see the code being run)

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Code Tree</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<link rel="stylesheet" href="/vendor/xterm.min.css" />
 <style>
   :root { --bg:#060a12; --line:rgba(120,160,220,.18); --ink:#9fb0c6; --neon:#5cc8ff; }
   * { box-sizing:border-box; }
@@ -204,8 +204,8 @@
     <div id="right"><iframe id="viz" src="/viz" title="World tree"></iframe></div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="/vendor/xterm.min.js"></script>
+  <script src="/vendor/xterm-addon-fit.min.js"></script>
   <script>
   const WS_PORT = window.__WS_PORT__ || 7778;
 
