@@ -13,6 +13,7 @@ import { WS_PORT, WEB_PORT, isIgnored, ANOMALY } from '../config.js';
 import { Graph } from './state.js';
 import { parseImports } from './parser.js';
 import { createRemoteSource } from './remote-source.js';
+import { createDraftStream } from './draft-stream.js';
 import { traceProject } from './agent-trace.js';
 import { createEmptyState as lmState, ingestEvent as lmIngest, evaluateAll as lmEval, setFileResolver as lmResolver } from './lie-monitor.js';
 import { createRunner } from './runner.js';
@@ -203,6 +204,9 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   const lie = lmState();
   lmResolver((p) => { if (remote) return { ok: false, reason: 'uncheckable' }; return null; });
   let lieAgentBuf = '', lieUserBuf = '';
+  // Watch the active terminal's text and turn "code being written" into a live, still-unnamed cell that binds
+  // to a filename the moment the agent saves it (see draft-stream.js). Pure broadcast; the page draws it.
+  const draftStream = createDraftStream((e) => broadcast({ type: 'draft', payload: e }));
   function broadcastLie(alerts) { if (alerts && alerts.length) broadcast({ type: 'lie', payload: { alerts } }); }
   function lieFeed(role, content) { if (!content) return; try { broadcastLie(lmIngest(lie, { sessionId: 'main', role, content })); } catch {} }
   const lieTimer = setInterval(() => {
@@ -628,6 +632,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         }
       }
       lieAgentBuf += clean; if (lieAgentBuf.length > 12000) lieAgentBuf = lieAgentBuf.slice(-12000); // feed the agent's output to the lie monitor
+      draftStream.feed(clean); // and to the live draft-cell watcher: code on screen → unnamed cell → named on save
       // (a) precise: you ssh'd in OUR shell → follow the remote prompt's cwd
       if (entry.sshTarget) {
         const last = entry.outbuf.split('\n').pop();

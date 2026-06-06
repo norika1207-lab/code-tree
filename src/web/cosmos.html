@@ -85,6 +85,14 @@
   @keyframes writepulse { 0%,100%{box-shadow:0 0 0 2px var(--neon),0 0 12px rgba(92,200,255,.4)} 50%{box-shadow:0 0 0 2px var(--neon),0 0 22px rgba(92,200,255,.7)} }
   .fcard.writing .bd::after { content:'▏'; color:var(--neon); font-weight:700; animation:caret .6s steps(1) infinite; }
   @keyframes caret { 0%,100%{opacity:1} 50%{opacity:0} }
+  /* Draft cell: code is being typed in the CLI and has no filename yet (dashed = not on disk). A live caret
+     blinks at the end of the streaming code. When it binds to a filename the dashes go solid (saved). */
+  .fcard.draft { border-style:dashed; border-color:var(--amber); }
+  .fcard.draft .badge { background:var(--amber); color:#241a02; }
+  .fcard.draft .bd::after { content:'▏'; color:var(--amber); font-weight:700; animation:caret .55s steps(1) infinite; }
+  .fcard.draft.bound { border-style:solid; border-color:var(--neon); }
+  .fcard.draft.bound .badge { background:var(--neon); color:#04130c; }
+  .fcard.draft.bound .bd::after { content:''; }
   /* Birth order: which file was built first, which came later */
   .fcard .hd .seq { flex:0 0 auto; font-size:10px; font-weight:800; color:#9fb4d6;
     background:rgba(120,160,220,.16); border-radius:5px; padding:1px 6px; letter-spacing:.3px; }
@@ -306,6 +314,7 @@
   svg.call(zoom).on('dblclick.zoom', null);
 
   function statusColor(c){
+    if(c.draft) return COLOR.active;
     if(c.anomaly==='repeat' || c.status==='error') return COLOR.error;
     if(c.status==='modified') return COLOR.modified;
     if(c.status==='active') return COLOR.active;
@@ -319,6 +328,8 @@
 
   // Card state: red (anomaly) > green (AI working in this tile) > amber (edited this round)
   function cardState(c){
+    if(c.draft && !c.bound) return ' active draft';   // code being typed, no filename yet
+    if(c.draft) return ' active draft bound';          // just saved → named, still fresh
     if(c.anomaly==='repeat' || c.status==='error' || c.anomaly==='stall') return ' error';
     if(c.path===activePath || c.status==='active') return ' active';
     if(c.status==='modified' || c.modification_count) return ' modified';
@@ -327,6 +338,8 @@
   // Badge text only for things that need your attention. Normal active/modified state is already
   // carried by the border + the status dot, so don't repeat it as text (calm by default, loud on event).
   function cardBadge(c){
+    if(c.draft && !c.bound) return '✎ writing…';
+    if(c.draft && c.bound) return '✓ saved';
     if(c.anomaly==='repeat') return '⚠ Repeated '+(c.modification_count||'');
     if(c.anomaly==='stall') return '⚠ Stalled';
     if(c.status==='error') return '⚠ Error';
@@ -832,6 +845,49 @@
 
   // ── WebSocket ──
   let lastCells=null;
+  // Draft cells: code being typed in the CLI that isn't a saved file yet. They live in their own layer ON TOP
+  // of the scanned project, so a project rescan never wipes the box you're watching fill. Once a draft binds to
+  // a filename AND that file shows up in a real scan (same path), the draft is dropped — the real cell took over.
+  let stateCells=[];                 // the last scanned project snapshot
+  const draftMap=new Map();          // draftId → live draft cell
+  let draftSeq=900000;               // born_seq high so drafts sort to the newest tier
+  function composeCells(){
+    const have=new Set(stateCells.map(c=>c.path));
+    const drafts=[...draftMap.values()].filter(d=> !(d.bound && have.has(d.path)));
+    return stateCells.concat(drafts);
+  }
+  function redrawWithDrafts(){ lastCells=composeCells(); const um=userMoved; userMoved=true; render(lastCells, lastEdges); userMoved=um; }
+  function onDraft(e){
+    if(e.op==='open'){
+      const path='⟨ writing '+e.id+' ⟩';
+      const cell={ id:'draft:'+e.id, path, language:e.lang||'txt', category:'✎ drafting',
+        status:'active', modification_count:1, anomaly:null, size_lines:0,
+        draft:true, bound:false, born_at:performance.now(), born_seq:draftSeq++ };
+      draftMap.set(e.id, cell); contentByPath.set(path, '');
+      redrawWithDrafts();
+    } else if(e.op==='code'){
+      const cell=draftMap.get(e.id); if(!cell) return;
+      contentByPath.set(cell.path, e.code||''); cell.size_lines=(e.code||'').split('\n').length;
+      // stream the new code straight into the existing card body, no full re-render (so it doesn't flicker)
+      const pre=bdEls.get(cell.path);
+      if(pre){ pre._tw=false; pre.textContent=clip(e.code||''); const card=pre.closest('.fcard'); if(card) card.scrollTop=0; }
+      else redrawWithDrafts();   // card not on screen yet → draw it
+    } else if(e.op==='bind'){
+      const cell=draftMap.get(e.id); if(!cell) return;
+      const old=cell.path, name=e.path.replace(/^\.\//,'');
+      // dedupe: if another draft already claimed this filename (e.g. the agent's tool line echoed twice), drop it
+      for(const [k,d] of draftMap){ if(k!==e.id && d.path===name){ contentByPath.delete(d.path); bdEls.delete(d.path); draftMap.delete(k); } }
+      const code=contentByPath.get(old)||''; contentByPath.delete(old); contentByPath.set(name, code);
+      cell.path=name; cell.id='draft:'+name; cell.bound=true;
+      const slash=name.indexOf('/'); cell.category= slash>0 ? name.slice(0,slash) : 'root';
+      bdEls.delete(old);
+      redrawWithDrafts(); setActive(name);
+    } else if(e.op==='close'){
+      const cell=draftMap.get(e.id); if(!cell) return;
+      if(cell.bound){ draftMap.delete(e.id); }   // saved file → let the real scan own it from here
+      else { cell.status='idle'; redrawWithDrafts(); } // unnamed code box stays visible until a file claims it
+    }
+  }
   let socket=null;            // WS connection; keep the send pipe on standby, the view itself only watches
   function send(obj){ if(socket && socket.readyState===1) socket.send(JSON.stringify(obj)); }
   function connect(){
@@ -844,10 +900,13 @@
       let m; try{ m=JSON.parse(ev.data);}catch{ return; }
       if(m.type==='state'){
         if(m.payload && m.payload.root){ const r=m.payload.root.split('/').filter(Boolean); projectName=r[r.length-1]||'Project'; }
-        lastCells=(m.payload&&m.payload.cells)||[]; render(lastCells, (m.payload&&m.payload.edges)||lastEdges);
+        stateCells=(m.payload&&m.payload.cells)||[];
+        if(m.payload&&m.payload.edges) lastEdges=m.payload.edges;
+        lastCells=composeCells(); render(lastCells, lastEdges);
         // sync the ledger with any file that has been changed (covers local + remote)
-        for(const c of lastCells){ if((c.modification_count||0)>0 || c.status==='modified' || c.status==='error') noteChange(c.path, c.modification_count||1); }
+        for(const c of stateCells){ if((c.modification_count||0)>0 || c.status==='modified' || c.status==='error') noteChange(c.path, c.modification_count||1); }
       }
+      else if(m.type==='draft' && m.payload){ onDraft(m.payload); }
       else if(m.type==='token_by_file' && m.payload){ tokByFile.set(m.payload.path, m.payload.total); if(ledger.has(m.payload.path)) renderLedger(); }
       else if(m.type==='recall' && m.payload){
         const n=m.payload.count||1, el=document.getElementById('recall');
