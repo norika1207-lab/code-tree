@@ -6,6 +6,17 @@ dist-web/
 release/
 *.tgz
 
+# Secrets — never commit credentials (the app borrows the token from Keychain at runtime; nothing is stored)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+id_rsa
+id_ed25519
+*credentials*
+*secret*
+
 # Bragi local-model runtime (llama-server binary + 786MB GGUF): staged locally before build,
 # bundled into the app via extraResources. Too big for git.
 runtime/
