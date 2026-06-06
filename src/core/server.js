@@ -14,6 +14,7 @@ import { Graph } from './state.js';
 import { parseImports } from './parser.js';
 import { createRemoteSource } from './remote-source.js';
 import { traceProject } from './agent-trace.js';
+import { createEmptyState as lmState, ingestEvent as lmIngest, evaluateAll as lmEval, setFileResolver as lmResolver } from './lie-monitor.js';
 import { createRunner } from './runner.js';
 import { createSdkAgent } from '../cli/sdk-agent.js';
 import { createRoutedAgent } from '../cli/routed-agent.js';
@@ -186,6 +187,22 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     logBroadcast(msg);
   }
 
+  // ── Lie Monitor (照妖鏡): watch the gap between what the agent in the terminal CLAIMS and the real evidence.
+  // The agent's output is fed as "assistant" turns (its promises), files appearing are fed as evidence. A file
+  // it promised that never shows up (or is empty) → alert, with a ready-to-paste reply. Remote paths are judged
+  // by whether the remote scanner saw the file (not local fs), to avoid false positives. ──
+  const lie = lmState();
+  lmResolver((p) => { if (remote) return { ok: false, reason: 'uncheckable' }; return null; });
+  let lieAgentBuf = '', lieUserBuf = '';
+  function broadcastLie(alerts) { if (alerts && alerts.length) broadcast({ type: 'lie', payload: { alerts } }); }
+  function lieFeed(role, content) { if (!content) return; try { broadcastLie(lmIngest(lie, { sessionId: 'main', role, content })); } catch {} }
+  const lieTimer = setInterval(() => {
+    if (lieUserBuf) { lieFeed('user', lieUserBuf.slice(-2000)); lieUserBuf = ''; }
+    if (lieAgentBuf) { lieFeed('assistant', lieAgentBuf.slice(-8000)); lieAgentBuf = ''; }
+    try { broadcastLie(lmEval(lie)); } catch {}
+  }, 4000);
+  if (lieTimer.unref) lieTimer.unref();
+
   // In remote mode the tree comes from the latest ssh snapshot; otherwise from the local graph.
   function currentSnapshot() { return remoteSnap || graph.snapshot(); }
   function pushState() {
@@ -266,8 +283,12 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     watcher = chokidar.watch(root, {
       ignored: (p) => isIgnored(p), // chokidar v4: ignored takes a function, no longer a glob
       ignoreInitial: false,
+      ignorePermissionErrors: true,
       persistent: true,
     });
+    // CRITICAL: a single unwatchable entry (a unix socket, an Adobe IPC control file, a permission-denied path)
+    // emits an 'error' on the FSWatcher. Without this handler Node throws it as uncaught and the whole core dies.
+    watcher.on('error', (e) => log('watcher error (ignored):', (e && e.message) || e));
     watcher
     .on('add', (p) => {
       if (!graph.isCode(p)) return;
@@ -281,6 +302,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       if (ready) {
         const cell = graph.record(p, 'create');
         emitActivity(cell, 'create');
+        lieFeed('file', p); // real evidence: a file the agent promised actually appeared
         pushState();
       }
     })
@@ -289,6 +311,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       reparse(p);
       const cell = graph.record(p, 'modify');
       emitActivity(cell, 'modify');
+      lieFeed('file', p);
       // Anomaly: repeated modification
       if (cell.modification_count >= ANOMALY.REPEAT_MODIFY) {
         broadcast({
@@ -335,7 +358,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         if (snap.changed && snap.changed.length) {
           // Light up each changed/new file (card glows + code streams in) and fly the camera to the newest —
           // so when the agent writes or creates a file on the remote, the world-tree jumps to that cell.
-          for (const p of snap.changed) broadcast({ type: 'activity', payload: { path: p, action: 'modify', ts: Date.now() } });
+          for (const p of snap.changed) { broadcast({ type: 'activity', payload: { path: p, action: 'modify', ts: Date.now() } }); lieFeed('file', root.replace(/\/$/, '') + '/' + p); }
           broadcast({ type: 'active', payload: { path: snap.changed[0], id: snap.changed[0] } });
         }
       },
@@ -564,6 +587,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       while ((nl = entry.inbuf.search(/[\r\n]/)) >= 0) {
         const line = entry.inbuf.slice(0, nl);
         entry.inbuf = entry.inbuf.slice(nl + 1);
+        if (line.trim()) { lieUserBuf += line + '\n'; if (lieUserBuf.length > 3000) lieUserBuf = lieUserBuf.slice(-3000); } // what you asked = the instruction
         const m = line.match(/^\s*ssh\s+(?:-\S+\s+|-\S+\s*)*([\w.@-]+(?::\d+)?)\s*$/) || line.match(/^\s*ssh\s+(?:\S+\s+)*?([\w.@-]+)\s*$/);
         if (m && m[1] && !/^-/.test(m[1])) entry.sshTarget = m[1];
         // user explicitly leaves the ssh session → tree goes back to the local project (robust; ignores flaky disconnects)
@@ -577,7 +601,9 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     // (claude/codex) doing its own ssh/edits, plain shells, scp/rsync, host:/path mentions, cd, git -C, etc.
     // All the messy format-matching lives in agent-trace.js (unit-tested against dozens of real shapes).
     function detectRemoteFromOutput(entry, data) {
+      const clean = data.replace(ANSI, '');
       entry.outbuf = (entry.outbuf + data).replace(ANSI, '').slice(-4000);
+      lieAgentBuf += clean; if (lieAgentBuf.length > 12000) lieAgentBuf = lieAgentBuf.slice(-12000); // feed the agent's output to the lie monitor
       // (a) precise: you ssh'd in OUR shell → follow the remote prompt's cwd
       if (entry.sshTarget) {
         const last = entry.outbuf.split('\n').pop();
@@ -587,9 +613,15 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       // (b) inferred: read every signal in the recent output and follow the project it points at
       const tr = traceProject(entry.outbuf, { sshAliases: SSH_ALIASES });
       if (tr.host && tr.root) { enterRemote(tr.host, tr.root); return; }
-      // (c) local project the agent is editing (e.g. claude Edit(/abs/path)) that our shell never cd'd into
-      if (!remote && !tr.host && tr.root && tr.root !== os.homedir() && tr.root !== '/') {
-        try { if (fs.existsSync(tr.root) && fs.statSync(tr.root).isDirectory() && path.resolve(tr.root) !== root) reroot(tr.root); } catch {}
+      // (c) local project the agent is editing (e.g. claude Edit(/abs/path)) that our shell never cd'd into.
+      // Guard hard: never reroot to a system dir (/tmp, /var, …) and only follow somewhere that looks like a
+      // real project — otherwise we'd point the watcher at junk (and choke on sockets/IPC files there).
+      if (!remote && !tr.host && tr.root) {
+        const SYS = new Set(['/', '/tmp', '/var', '/private', '/private/tmp', '/usr', '/etc', '/bin', '/sbin', '/dev', '/opt', '/Users', '/Applications', '/Library', '/System', os.homedir(), os.tmpdir()]);
+        const r = path.resolve(tr.root);
+        if (!SYS.has(r) && r !== root) {
+          try { if (fs.existsSync(r) && fs.statSync(r).isDirectory() && looksLikeProject(r)) reroot(r); } catch {}
+        }
       }
     }
 
