@@ -53,7 +53,9 @@ export function evaluateSession(state, sessionId, now = Date.now(), options = {}
     const age = now - p.createdAt;
     const stale = options.force === true || age > s.settings.staleMs;
     if (!stale) continue;
-    const missing = p.evidenceRequired.length > 0 && p.evidence.length === 0;
+    // Only raise the generic "no evidence" alert when a concrete FILE was promised but never appeared.
+    // Vague prose that merely contains words like "run" / "command" (e.g. a slash-command help line) is not a lie.
+    const missing = p.evidenceRequired.some((r) => r.type === 'file') && p.evidence.length === 0;
     if (missing && !p.alertedMissing) {
       p.alertedMissing = true;
       alerts.push(makeAlert('missing_evidence', p, { severity: SEVERITY.HIGH, message: 'AI 說它做了事,但沒看到對應的檔案/命令/程序證據。', suggestedReply: buildReply(p) }));
