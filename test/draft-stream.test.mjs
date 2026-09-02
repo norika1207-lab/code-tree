@@ -6,7 +6,7 @@ let pass = 0, fail = 0; const fails = [];
 function run(name, chunks, check) {
   const ev = [];
   const ds = createDraftStream((e) => ev.push(e));
-  for (const c of chunks) ds.feed(c);
+  for (const c of chunks) { ds.feed(c); ds.tick(); }
   try { check(ev); pass++; } catch (e) { fail++; fails.push({ name, msg: e.message, ev }); }
 }
 const ops = (ev) => ev.map((e) => e.op);

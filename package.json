@@ -14,6 +14,7 @@
     "src/",
     "electron/",
     "sample/",
+    "package-lock.json",
     "README.md",
     "LICENSE"
   ],
@@ -65,6 +66,7 @@
     "app": "electron .",
     "gui": "node bin/codetree.js",
     "dist": "bash scripts/build-mac.sh",
+    "dist:notarize": "CODETREE_NOTARIZE=1 bash scripts/build-mac.sh",
     "dist:dir": "electron-builder --mac dir",
     "release": "bash scripts/release.sh"
   },
@@ -76,13 +78,18 @@
       "electron/**/*",
       "src/**/*",
       "package.json",
-      "!src/cli/codex-agent.js",
-      "!node_modules/@openai/**",
       "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "identity": null,
+      "extendInfo": {
+        "NSDocumentsFolderUsageDescription": "Code Tree reads the project folder you choose so it can draw its file structure.",
+        "NSDesktopFolderUsageDescription": "Code Tree reads the project folder you choose so it can draw its file structure.",
+        "NSDownloadsFolderUsageDescription": "Code Tree reads the project folder you choose so it can draw its file structure.",
+        "NSNetworkVolumesUsageDescription": "Code Tree reads the project folder you choose so it can draw its file structure.",
+        "NSRemovableVolumesUsageDescription": "Code Tree reads the project folder you choose so it can draw its file structure."
+      },
       "target": [
         {
           "target": "dmg",

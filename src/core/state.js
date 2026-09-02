@@ -154,7 +154,12 @@ export class Graph {
     return {
       root: this.root,
       cells: [...this.cells.values()],
-      edges: [...this.edges.values()],
+      edges: [...this.edges.values()].map((e) => ({
+        from: this.rel(e.from),
+        to: this.rel(e.to),
+        type: e.type,
+        weight: e.weight,
+      })),
       recent: this.activities.slice(-30),
     };
   }

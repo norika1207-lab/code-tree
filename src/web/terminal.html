@@ -26,7 +26,7 @@
     padding:2px 7px; border:1px solid rgba(255,122,138,.4); border-radius:10px; cursor:default; }
   #recBadge.on { display:inline-flex; }
   #recBadge::before { content:''; width:7px; height:7px; border-radius:50%; background:#ff5a6e;
-    box-shadow:0 0 7px #ff5a6e; animation:recblink 1.4s ease-in-out infinite; }
+    box-shadow:0 0 7px #ff5a6e; }
   @keyframes recblink { 0%,100%{opacity:1} 50%{opacity:.25} }
   /* Token bar above the command input: this run's input / cache hits / output / saved, plus "Clear" to reset */
   /* Traffic lights only on the top bar; the token bar sits below it, so left padding goes back to 12px with nothing to make way for */
@@ -73,8 +73,10 @@
   #tabrail .tab.addbtn:hover { background:rgba(92,200,255,.1); color:#fff; border-color:var(--neon); }
   #tabrail .tab.addbtn.active { transform:none; box-shadow:none; }
   #termwrap { flex:1; min-width:0; position:relative; }
-  #termwrap .pane { position:absolute; inset:0; padding:6px 8px; display:none; }
+  #termwrap .pane { position:absolute; inset:0; padding:0; display:none; }
   #termwrap .pane.active { display:block; }
+  #termwrap .xterm { width:100%; height:100%; }
+  #termwrap .xterm-screen { width:100%; }
   /* The bar below the command line: a visible project switcher, no need to bury it in a system menu */
   #abar { flex:0 0 auto; height:36px; display:flex; align-items:center; gap:10px; padding:0 12px;
     border-top:1px solid var(--line); background:#070b12; font-size:12px; color:var(--ink); z-index:6; }
@@ -103,19 +105,21 @@
   #need p { margin:0; font-size:13px; color:var(--ink); line-height:1.7; max-width:440px; }
   #need code { background:rgba(120,160,220,.14); padding:3px 8px; border-radius:6px;
     font:13px/1.5 "SF Mono",ui-monospace,Menlo,monospace; color:var(--neon); }
-  /* MASL warning toast: pops up here when the AI (including claude in the terminal) writes something problematic on its own */
-  #alerts { position:absolute; top:72px; right:12px; left:88px; z-index:7;
-    display:flex; flex-direction:column; gap:8px; pointer-events:none; }
-  #alerts .al { pointer-events:auto; background:rgba(30,10,14,.96); border:1px solid #ff6b81;
-    border-radius:10px; padding:10px 12px; box-shadow:0 6px 22px rgba(0,0,0,.5);
-    font-size:12.5px; line-height:1.55; color:#ffd9df; display:flex; gap:9px; align-items:flex-start;
+  /* Anomaly warnings must never cover the working terminal. They dock below it and take layout space. */
+  #alerts { flex:0 0 auto; display:none; flex-direction:column; gap:5px; pointer-events:none;
+    max-height:74px; overflow-y:auto; padding:6px 10px 6px 58px;
+    border-top:1px solid rgba(255,107,129,.24); background:#070b12; scrollbar-width:thin; }
+  #alerts:not(:empty) { display:flex; }
+  #alerts .al { pointer-events:auto; background:rgba(30,10,14,.86); border:1px solid rgba(255,107,129,.48);
+    border-radius:8px; padding:7px 9px; box-shadow:none;
+    font-size:11.5px; line-height:1.35; color:#ffd9df; display:flex; gap:8px; align-items:flex-start;
     animation:alin .18s ease; }
   #alerts .al .ic { color:#ff6b81; font-size:14px; line-height:1.3; flex:0 0 auto; }
   #alerts .al .bd { min-width:0; flex:1; }
   #alerts .al .bd b { color:#ff9aa9; }
   #alerts .al .x { pointer-events:auto; cursor:pointer; color:#ff9aa9; flex:0 0 auto;
     padding:0 2px; opacity:.7; } #alerts .al .x:hover { opacity:1; }
-  @keyframes alin { from{ transform:translateY(-6px); opacity:0; } to{ transform:none; opacity:1; } }
+  @keyframes alin { from{ transform:translateY(5px); opacity:0; } to{ transform:none; opacity:1; } }
   /* MASL pre-action gate: before Code Tree's own agent edits a file or runs a command, block and wait for your nod */
   #masl { position:absolute; inset:0; z-index:9; display:none;
     align-items:center; justify-content:center; background:rgba(3,6,12,.78); backdrop-filter:blur(2px); }
@@ -213,12 +217,32 @@
   // Each tab owns its own xterm + a sessionId; the shell runs on the core side (one node-pty per sessionId).
   const TERM_OPTS = {
     fontFamily: '"SF Mono",ui-monospace,Menlo,Monaco,monospace',
-    fontSize: 13, lineHeight: 1.2, cursorBlink: true,
+    fontSize: 13, lineHeight: 1.2, cursorBlink: false,
     scrollback: 5000, // keep a deep history so you can scroll back up to code that already ran
     scrollOnUserInput: true,
-    theme: { background:'#05080e', foreground:'#eaf1fb', cursor:"#5cc8ff",
-      black:'#0b0f17', green:"#5fd39a", yellow:'#ffcf4d', red:'#ff6b81',
-      blue:'#7fb2ff', cyan:'#86e0ff', white:'#cfe0ff' },
+    theme: {
+      background:'#05080e',
+      foreground:'#c9d7ea',
+      cursor:'#5cc8ff',
+      cursorAccent:'#04121d',
+      selectionBackground:'rgba(92,200,255,.24)',
+      black:'#0b0f17',
+      red:'#ff6b81',
+      green:'#66d990',
+      yellow:'#ffcf4d',
+      blue:'#72a7ff',
+      magenta:'#d58cff',
+      cyan:'#5ed7ff',
+      white:'#d6e2f2',
+      brightBlack:'#66738a',
+      brightRed:'#ff8fa0',
+      brightGreen:'#83efb1',
+      brightYellow:'#ffe27a',
+      brightBlue:'#9ec2ff',
+      brightMagenta:'#ebb2ff',
+      brightCyan:'#9beaff',
+      brightWhite:'#ffffff'
+    },
   };
   const tabs = [];           // { id, term, fit, pane, btn, started }
   let activeId = null, seq = 0;
@@ -228,7 +252,7 @@
 
   const getTab = (id) => tabs.find(t => t.id === id);
   const active = () => getTab(activeId);
-  // Compute the real char-cell size from xterm's renderer (fall back to a font-based estimate).
+  // Compute the real char-cell size from xterm's renderer (fallback only; the official fit addon is preferred).
   function cellDims(term){
     try {
       const d = term._core && term._core._renderService && term._core._renderService.dimensions;
@@ -239,16 +263,20 @@
     const lh = (term.options && term.options.lineHeight) || 1.2;
     return { w: fs * 0.6, h: fs * lh };
   }
-  // Bulletproof fit: size the grid to the visible pane in pixels and push the true size to the pty, so
-  // full-screen TUIs (claude, vim, top) fill the terminal and pin their input to the very bottom.
+  // Use xterm's fit addon first. Manual cell math was close enough for plain shells, but it can drift with
+  // CJK fonts/retina scaling and make selection/input coordinates feel broken at column 0.
   function fitTab(t){
     if (!t || !t.pane || !t.pane.classList.contains('active')) return;
     const W = t.pane.clientWidth, H = t.pane.clientHeight;
     if (W < 24 || H < 24) return;
-    const { w, h } = cellDims(t.term);
-    const cols = Math.max(20, Math.floor((W - 16) / w));   // 8px pane padding each side
-    const rows = Math.max(6,  Math.floor((H - 12) / h));   // 6px pane padding top/bottom
-    if (cols !== t.term.cols || rows !== t.term.rows) { try { t.term.resize(cols, rows); } catch {} }
+    try {
+      t.fit.fit();
+    } catch {
+      const { w, h } = cellDims(t.term);
+      const cols = Math.max(20, Math.floor(W / w));
+      const rows = Math.max(6,  Math.floor(H / h));
+      if (cols !== t.term.cols || rows !== t.term.rows) { try { t.term.resize(cols, rows); } catch {} }
+    }
     if (t.started) send({ type:'pty_resize', sessionId:t.id, cols:t.term.cols, rows:t.term.rows });
   }
   function fitActive(){ fitTab(active()); }
@@ -259,23 +287,8 @@
     const term = new window.Terminal(TERM_OPTS);
     const fit = new window.FitAddon.FitAddon(); term.loadAddon(fit);
     term.open(pane);
-    // IME 中介態守門:macOS 注音/中文 IME composition 期間,xterm.js 預設會逐字送中介注音字進 PTY,
-    // 造成「現在能做什麼ㄒㄧㄕㄚ」這種注音穿透。攔截 textarea 的 input event,composing 期間 stopImmediatePropagation,
-    // 等 compositionend 時手動把成型字串一次送進 PTY。
-    {
-      const ta = pane.querySelector('.xterm-helper-textarea');
-      if (ta) {
-        ta.addEventListener('input', (e) => {
-          if (e.isComposing || (e.inputType && e.inputType.startsWith('insertCompositionText'))) {
-            e.stopImmediatePropagation();
-          }
-        }, true);
-        ta.addEventListener('compositionend', (e) => {
-          if (e.data) send({ type:'pty_input', sessionId:id, data: e.data });
-          ta.value = '';
-        });
-      }
-    }
+    // Do not manually forward IME composition text. xterm.js already owns its helper textarea; sending
+    // compositionend ourselves duplicates Chinese input and can replay prior text.
     term.onData((d) => send({ type:'pty_input', sessionId:id, data:d }));
     const btn = document.createElement('button'); btn.className = 'tab'; btn.textContent = String(tabs.length + 1);
     const x = document.createElement('span'); x.className = 'close'; x.textContent = '✕';
@@ -300,8 +313,8 @@
     if (t.started) return;
     fitActive();
     try {
-      // Short hint at the top of a normal terminal; the shell prompt follows below and rides the output down.
-      t.term.write('\x1b[90m  Your shell. \x1b[36mcd\x1b[90m into a project or \x1b[36mssh\x1b[90m to a server, then run \x1b[36mclaude\x1b[90m to build with AI.\x1b[0m\r\n');
+      // Short hint only; long helper prose wraps badly inside full-screen CLIs.
+      t.term.write('\x1b[90m  Terminal ready. \x1b[36mcd\x1b[90m project or \x1b[36mssh\x1b[90m host; tree follows.\x1b[0m\r\n');
     } catch {}
     send({ type:'pty_start', sessionId:t.id, cols:t.term.cols||80, rows:t.term.rows||24 });
     t.started = true;
@@ -408,7 +421,13 @@
       input.value = ''; input.style.height = 'auto'; input.focus();   // always clear after dispatch
     }
     btn.onclick = run;
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
+    input.addEventListener('keydown', (e) => {
+      // While IME composition is active (Chinese / Japanese typing) the Enter key COMMITS the candidate, not submits.
+      // Without this guard, keydown fires submit, then the IME commits the text, then the user hits Enter again to
+      // actually send — the prompt goes out doubled ("結果我連，結果我連").
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); }
+    });
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
     // Clean transcript: collect the model's raw text quietly, show only the files it touched + a done line.
     window.__agent = {
@@ -510,12 +529,13 @@
     const label = p.rule === 'repeat_modify' ? 'Repeated edits'
       : p.rule === 'stall' ? 'Stalled'
       : p.rule === 'error_recurring' ? 'Recurring error' : 'Anomaly';
-    el.innerHTML = `<span class="ic">⚠</span><div class="bd"><b>${esc(label)}</b><br>${esc(p.message||'')}</div><span class="x">✕</span>`;
-    el.querySelector('.x').onclick = () => el.remove();
+    el.innerHTML = `<span class="ic">!</span><div class="bd"><b>${esc(label)}</b><br>${esc(p.message||'')}</div><span class="x">x</span>`;
+    el.querySelector('.x').onclick = () => { el.remove(); requestAnimationFrame(() => fitActive()); };
     wrap.appendChild(el);
     // Softer ones like stall auto-dismiss after 12s; repeated edits / recurring errors stay so you face them
-    if (p.rule === 'stall') setTimeout(() => el.remove(), 12000);
+    if (p.rule === 'stall') setTimeout(() => { el.remove(); requestAnimationFrame(() => fitActive()); }, 12000);
     while (wrap.children.length > 5) wrap.firstChild.remove();
+    requestAnimationFrame(() => fitActive());
   }
 
   // ── The project switcher bar at the bottom ──

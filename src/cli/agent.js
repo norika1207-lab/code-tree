@@ -5,6 +5,7 @@ import path from 'node:path';
 import { TOOL_DEFS, makeExecutor } from './tools.js';
 import { verifyChangedFiles, formatProblems } from './verify.js';
 import { designGuidance } from './design.js';
+import { minimalDiscipline } from './minimal-discipline.js';
 
 // Small models often narrate "the file I'll read next" in text instead of actually issuing read_file (narrate-instead-of-call).
 // Pull from this closing text the source paths it named that actually exist and haven't been read, and have the loop issue read_file on its behalf,
@@ -40,7 +41,7 @@ const WRITE_TOOLS = new Set(['write_file', 'edit_file']);
 
 export function createAgent({ llm, root, emit, onEvent, model, systemSuffix, memory, verify = true, maxVerifyRounds = 3, maxNoWorkNudges = 2, tools = TOOL_DEFS }) {
   const execute = makeExecutor(root, emit);
-  const system = systemSuffix ? `${SYSTEM}\n${systemSuffix}` : SYSTEM;
+  const system = [SYSTEM, minimalDiscipline(), systemSuffix].filter(Boolean).join('\n\n');
   const messages = [];
   const activeTools = tools; // can be trimmed by the caller (e.g. give a local small model only write_file to avoid confusing it with edit_file's schema)
   const forceTarget = activeTools.some((t) => t.name === 'write_file') ? 'write_file' : (activeTools.find((t) => WRITE_TOOLS.has(t.name))?.name);

@@ -208,3 +208,161 @@ Web 端（Electron 視窗或瀏覽器 `localhost:7790`）：
 - `looksLikeProject` 放寬後，理論上家目錄底下若散落 code 檔、在某些 cd 路徑可能誤判，已排除 `$HOME` 本身，但子目錄邊界情況待觀察。
 - 本機 cwd 跟隨用 `lsof` 輪詢（1.5s），大量分頁切換時的 pid 追蹤待壓測。
 - `src/web/index.html`/`Tree.jsx` 舊 React 版與 cosmos.html 並存，未清理（保留 rollback）。
+
+---
+
+## 9. 2026-06-17 / 06-18 session 進度（接手請從這段讀起）
+
+寫於 2026-06-18 凌晨。寫的人：CLI 版 Claude（看不到畫面）。要交給能開瀏覽器的桌面版接手。
+
+### 9.1 norika 反覆講過的需求（從近幾個 session 的原話收齊）
+
+她已經抱怨非常多遍同一件事，請務必記住，不要再讓她重講。下面是各 session 撈出來的原話片段：
+
+需求一：開 app 進「對的專案」，而不是 root 整顆或上次的東西
+
+- 「他媽的到底何時可以把右邊的檔案樹做成我要的樣子」
+- 「我現在右邊的 tree 還是整個 code tree + root 的所有檔案」
+- 「像我剛剛不是叫你進入 calliope，那就是進到那個檔案樹就好了，不需要看到 root 那堆還有其他跟他無關的東西」
+- 「像我現在就是看到所有的檔案格子，但那些是什麼？我不知道，也不是我開的專案」
+
+翻譯：她在哪個專案啟動 app 就要載哪個專案。她進 calliope 就要看 calliope 的樹，不是 Code Tree 本身的 root 一堆檔案。
+
+需求二：tree 要長得像 file explorer，不要長直線串燒
+
+- 「之前我有跟畫圖的 AI 說，這樣子一直往下拉，根本就不是結構，是串燒。然後我得縮的很小很小很小才看得到一點點的格子，因為太長了，長到畫面塞不下」
+- 「有格子，但是一大堆，看起來像是原本排版好的 code tree 的格子，但是現在變成整條超級特長的直線，一堆格子跟一條線再插出一條線去接其他格子，一路到底，應該有百來個」
+
+翻譯：cosmos.html 的 layout 一定要保留「indented file-explorer」這個風格，每行一個檔/資料夾，依 depth 縮排。不准換成 d3.tree horizontal。
+
+需求三：跑到哪個檔案就跳到那個格子
+
+- 「那個玩意從做的那一天開始都沒有正常過」
+- 「幫我修正常，現在跑到哪個檔案，就應該跳到哪個格子才對」
+
+翻譯：當 agent 或她在編輯某個檔案，cosmos 上對應格子要 active 高亮，鏡頭要飛過去。這條我（本 session）沒有驗證是不是 work，請接手實測。
+
+需求四：終端機輸入中文不要重複兩次
+
+- 「結果我連<<我沒有連續輸入兩次，他在命令列的指令打中文都會變得很奇怪，我要他跟一般終端機開啟 claude 一樣就好了，結果命令列常常會我打一段字結果突然重複兩次」
+
+翻譯：app 內 pty 對中文輸入 IME 有處理 bug，會把一段字重複送兩次。可能跟 `src/core/pty-bridge.py`（git untracked 新檔）有關。我沒看這個。
+
+需求五（meta 級）：不要假裝做了事卻沒貼證據
+
+她有「照妖鏡 / 複製打臉」格式，貼回來的長這樣：
+
+```
+AI 說: run in background) ✢ Thundering… (1m 36s ·↓ 3
+⚠ AI 說它做了事，但沒看到對應的檔案/命令/程序證據。
+請貼 raw evidence；沒做就明說。
+```
+
+碰到這個格式 = 你剛才在睜眼說瞎話。沒做就明說沒做，不要繼續編。
+
+### 9.2 前一個 session（2a2396ed, 6/17 21:30 到 23:49）做的災難
+
+它把 `src/web/cosmos.html` 的 layout 從原本的「indented file-explorer」（用 `INDENT=34`, `ROW_H=46` 兩個常數做縮排，pre-order DFS 每節點一行）整段改寫成 `d3.tree()` 的 horizontal tree（root-at-left, sibling 排垂直軸）。
+
+結果：檔案數 > 18 進入 `useBoxDefault` 模式時，d3.tree 的 leaves 全部攤成一條超長垂直直線，norika 看到就是上面需求二引用的那段崩潰描述。
+
+這個改動已被我（本 session）revert 掉，**不要再把它改成 d3.tree**。
+
+### 9.3 本 session（44190a4f）已做的事
+
+兩件：
+
+1. `git checkout 760c184 -- src/web/cosmos.html`：把 cosmos.html 還原到 checkpoint 那版的 indented file-explorer。`git status` 上 cosmos.html 現在是乾淨的。
+   - 關鍵函數：`layout(cells, edges, exp)` 在 line ~409，用 `INDENT * depth` + `row * ROW_H`。
+   - `linkPath(sx,sy,tx,ty)` 在 line ~449，vertical elbow。
+
+2. 修 `electron/main.js` 開 app 時帶入對的 root（解需求一的第一步）。
+   - 原本啟動順序：`CODE_TREE_ROOT env` → `prefs.lastProject` → no-project scratch
+   - 改成：`CODE_TREE_ROOT env` → `process.cwd()`（safe + 看起來是專案才用）→ `prefs.lastProject` → no-project
+   - 新增 `looksLikeProject(dir)` helper（檢查 marker 檔或 src/），跟 `src/core/server.js` 內的同名函數平行
+   - 加了 `logln('startup root pick: ...')`，下次抱怨「又進錯專案」直接看 codetree.log 第一行就知道
+
+效果（理論上）：
+- `npm run app` 在哪個專案目錄跑就以那為 root
+- `electron .` 同理
+- 從 Finder 雙擊 .app（cwd 通常是 /）會自然 fall through 到 lastProject
+- `codetree ~/calliope` launcher 的行為不變（env 排第一）
+
+### 9.4 還沒驗證 / 還沒解的
+
+我（CLI 版）沒辦法看畫面，下面這些理論上應該對，要接手實測：
+
+- [ ] `npm run app` 在 Code Tree 目錄跑，右邊長出 Code Tree 自己的縮排 tree，不是長直線、不是空白、不是 home 整個。
+- [ ] cd 到別的專案後 tree 切過去（`reroot` in server.js line 898，`startCwdFollow` line 943）。
+- [ ] 需求三「active file 高亮」是否 work，沒測過。
+- [ ] 需求四「中文輸入重複兩次」沒處理。`src/core/pty-bridge.py` 是 untracked 新檔，可能跟這個有關，但我沒看。
+- [ ] git status 上 modified 但我沒 review 的：`src/core/draft-stream.js`, `src/core/runner.js`, `src/core/state.js`, `src/core/parser.js`, `src/core/remote-source.js`。接手前先 `git diff HEAD` 過一遍，可能跟即時高亮 / draft stream 有關。
+
+### 9.5 不要做的事
+
+- 不准用 em-dash、不准用粗體、不准用「Furthermore / Moreover / Additionally / Notably / 綜上所述」這種連接詞。中文對話禁英文長段。違反 = 整段廢掉重寫。
+- 不准在收尾說「先睡 / 晚安 / 早點休息 / 好好休息」。她常凌晨還在改，AI 沒立場提醒她生理時鐘。
+- 不准對她用「幹」這類髒字。她自己罵照舊。
+- 不准 polish 她說的話，不准 disclaimer，不准 emoji（除非她明確要）。
+- 不准把 d3.tree 或 horizontal layout 塞回來。
+- 不准估算時間（「過去 3 週」「最近幾個月」）。不確定就去看 git log timestamp。
+- 不准沒做就講做了。沒做就明說。
+
+### 9.6 起手式
+
+1. `git status` 對照本段
+2. `cat ~/Library/Application\ Support/Code\ Tree/codetree.log | head -50`（或 `~/Library/Application Support/code-tree/codetree.log`，看 bundleId 而定，雙開都試）看上次啟動有沒有錯
+3. `npm run app`，看右邊 tree
+4. dev tools console 看 WS 連線 / layout 報錯
+5. 如果開不起來或還是長直線：把 cosmos.html / main.js 的當前 diff 跟 console 錯誤一起貼給 norika，問她要不要繼續挖，不要自己亂改方向
+
+### 9.7 環境
+
+- 本機 macOS（Darwin 25.4.0 / arm64）
+- repo 根：`/Users/norikaoda/Dropbox/Code Tree`
+- main entry：`electron/main.js`
+- web 前端：`src/web/cosmos.html`（主視覺）/ `src/web/terminal.html`
+- core：`src/core/server.js`（1379 行）
+- launcher：`bin/codetree.js`
+- HEAD：`760c184 checkpoint: save all local work before closing the project`
+
+norika 的 voice：直接，不繞，認 bug 認得很爽快。跟她對話別 polish 別 emoji 別 disclaimer。她有問題會直接告訴你。
+
+---
+
+## 10. 2026-06-18 桌面版 session 進度（需求二、需求三已修+驗）
+
+接手者：能開瀏覽器的桌面版。只動了 `src/web/cosmos.html` 一個檔。
+
+### 10.1 需求二「串燒」根因 + 修法（已用截圖驗）
+
+根因不是 layout 演算法（那個是對的 indented file-explorer），是 `fitToView()` 自打嘴巴：函數註解寫「只用寬度縮放，否則格子縮到看不見」，但程式碼被前面某 session 改成寬高都 fit（`Math.min(w/bw, h/bh)`）。樹有 79 節點、一行一個 ×46px = 高 4416px，硬塞進 720px 高 → 全樹 `scale(0.15)`，就是那條看不見的細柱。
+
+修法：`fitToView()` 改成固定可讀原寸（scale 1.0）、root 釘左上、往下捲看其餘，只有當樹「真的比面板寬」才縮到 MIN_SCALE。另外收掉「每個 dot 都預留一張 CARD_W+200 幻影卡」的 bbox 膨脹（改成 `anyCard? CARD_W+30 : 180`）。
+
+不准再改回 `Math.min(w/bw, h/bh)` 那種寬高都 fit 的寫法，那就是串燒本體。
+
+### 10.2 需求三「跑到哪跳到哪」根因 + 修法（已用真實檔案事件驗，雙向）
+
+根因：`render()` 尾端每次 server 推送都無條件 `fitToView()` 把鏡頭打回頂端，蓋掉 `centerOn` 飛過去的鏡頭，所以 active 檔永遠停不住。
+
+修法兩段：
+- `render()` 相機決策改成：有 active 檔時 follow（`centerOn(activePath)`）、不再 fitToView 回頂；用 `lastCentered` 去重避免每次推送重 reveal。沒 active 檔才 fitToView 看全樹。
+- `centerOn()` 從 `.transition().duration(1000)` 動畫改成「即時 `svg.call(zoom.transform,t)`、只垂直捲動把 active 那列拉到畫面中間、保持原縮放與水平位置」（檔案總管 reveal 行為）。
+
+驗法：新增 `test/zzz_probe_follow.js`（已刪）→ watcher 送 `activity` → 樹自動捲到最底 reveal 該格；再改 `bin/codetree.js` → 鏡頭往上捲回 bin/ reveal。兩方向都截圖看到。
+
+### 10.3 ⚠ 測這個 app 的雷：headless preview 的 requestAnimationFrame = 0
+
+用瀏覽器 preview（無頭）測時，`requestAnimationFrame` 完全不觸發（量過 800ms 0 ticks），連最陽春的 d3 transition / tween 都停在 0。所以任何 `.transition()` 的鏡頭動畫在 preview 裡「看起來壞掉」其實是環境問題，不是碼的 bug。
+
+教訓：鏡頭 / reveal 這種「正確性」功能不要依賴 rAF，用即時 `zoom.transform`（這也順便讓無頭環境可截圖驗證、真機萬一被 throttle 也不會卡）。純裝飾動畫（flowBall 那種）才放 transition。
+
+### 10.4 還沒由我驗（要真機）
+
+- 需求一（開對的專案）：`electron/main.js:266-281` root-pick 邏輯讀過是對的（env CODE_TREE_ROOT → cwd 若是專案 → lastProject → follow），但要真的 `codetree <dir>` / 從專案目錄 `npm run app` 端到端確認。前一個 session 的未 commit 改動，不是本 session 做的。
+- 需求四（中文重複兩次）：`src/web/terminal.html:290-292` 已拿掉手動 IME compositionend 轉發、改用 xterm.js 自己的 textarea。headless 沒中文輸入法測不了，要 norika 本人在真 app 打中文確認。
+
+### 10.5 工作區提醒
+
+git status 上有一大堆「不是 760c184 checkpoint、也不是本 session」的未 commit 改動（server.js 一個就 633 行）。本 session 只碰 cosmos.html。動別的檔前先 `git diff HEAD` 那個檔，別假設工作區乾淨。

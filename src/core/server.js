@@ -9,10 +9,10 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { WS_PORT, WEB_PORT, isIgnored, ANOMALY } from '../config.js';
+import { WS_PORT, WEB_PORT, isIgnored, ANOMALY, CODE_EXT } from '../config.js';
 import { Graph } from './state.js';
 import { parseImports } from './parser.js';
-import { createRemoteSource } from './remote-source.js';
+import { createRemoteSource, findRemoteProject } from './remote-source.js';
 import { createDraftStream } from './draft-stream.js';
 import { traceProject } from './agent-trace.js';
 import { createEmptyState as lmState, ingestEvent as lmIngest, evaluateAll as lmEval, setFileResolver as lmResolver } from './lie-monitor.js';
@@ -25,6 +25,15 @@ import { createMemory } from '../cli/memory.js';
 import { readUsage } from './token-meter.js';
 import { computeSavings } from './token-savings.js';
 import { createSessionLogger } from './session-log.js';
+import { injectSshControlIntoCommand, sshControlArgs, sshControlEnv } from './ssh-control.js';
+import {
+  cellsFromText,
+  expandHome,
+  projectPathFromText,
+  remoteSpecFromText,
+  looksLikeProject as looksLikeTextProject,
+  scanLocalProject,
+} from './text-tree.js';
 
 // Work discipline for the local small model (used by routed's first tier). Makes the small model actually call tools instead of just describing a plan.
 const LOCAL_DISCIPLINE = `(Important work discipline)
@@ -35,6 +44,96 @@ const LOCAL_DISCIPLINE = `(Important work discipline)
 - If a tool tells you it "could not find the text to replace", that edit did not take effect. Switch to write_file and rewrite the whole file. Do not paste the same old_str again.
 - Only when the entire task is truly done should you give a final plain-text wrap-up; do not emit any tool call on that turn.`;
 
+function readBody(req, limit = 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > limit) reject(new Error('request body too large'));
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+}
+
+function writeJson(res, status, payload) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(payload));
+}
+
+function parseRequestText(raw) {
+  const body = String(raw || '');
+  try {
+    const j = JSON.parse(body || '{}');
+    return { json: j, text: j.text || j.prompt || j.root || body };
+  } catch {
+    return { json: null, text: body };
+  }
+}
+
+function projectNameFromText(text) {
+  const m = String(text || '').match(/(?:open|開啟|打開|進入|切到|改|查|找|掃描|scan|project|專案)\s*([A-Za-z0-9_.-]{3,100})/i);
+  if (!m) return null;
+  const name = m[1].replace(/[，。；;:：]+$/g, '');
+  if (/^(project|repo|code|tree|scan|open|local|remote)$/i.test(name)) return null;
+  return name;
+}
+
+function findLocalProjectByName(name) {
+  const wanted = String(name || '').toLowerCase();
+  if (!wanted) return null;
+  const roots = [
+    path.join(os.homedir(), 'Dropbox'),
+    path.join(os.homedir(), 'Documents'),
+    path.join(os.homedir(), 'Desktop'),
+    path.join(os.homedir(), 'Projects'),
+    path.join(os.homedir(), 'workspace'),
+  ];
+  const privacyDirs = new Set([
+    'Library',
+    'Mobile Documents',
+    'Pictures',
+    'Photos Library.photoslibrary',
+    'Music',
+    'Movies',
+    'Photo Booth Library',
+    '.Trash',
+  ]);
+  const seen = new Set();
+  const queue = [];
+  for (const r of roots) {
+    const abs = path.resolve(r);
+    try {
+      if (fs.existsSync(abs) && fs.statSync(abs).isDirectory() && !seen.has(abs)) {
+        seen.add(abs);
+        queue.push({ dir: abs, depth: 0 });
+      }
+    } catch {}
+  }
+  let checked = 0;
+  while (queue.length && checked < 12000) {
+    const { dir, depth } = queue.shift();
+    checked++;
+    const base = path.basename(dir).toLowerCase();
+    if ((base === wanted || base.includes(wanted)) && looksLikeTextProject(dir)) return dir;
+    if (depth >= 5) continue;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      if (ent.name === 'node_modules' || ent.name === '.git' || privacyDirs.has(ent.name)) continue;
+      if (ent.name.startsWith('.') && ent.name !== '.config') continue;
+      const abs = path.join(dir, ent.name);
+      if (!seen.has(abs)) {
+        seen.add(abs);
+        queue.push({ dir: abs, depth: depth + 1 });
+      }
+    }
+  }
+  return null;
+}
+
 // makeAgent is injectable: defaults to the SDK agent (borrowing Claude Code's login); tests swap in scripted (burns no token).
 export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_PORT, quiet = false, makeAgent, terminalCwd, projectLabel, noProject = false, remote = null } = {}) {
   root = path.resolve(root);
@@ -42,10 +141,17 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   // The local graph/chokidar are bypassed; the tree comes from periodic remote snapshots.
   let remoteSnap = null;
   let remoteSource = null;
+  let remoteFocusRel = null;
+  let remoteSingleContent = new Map();
+  let staticSnap = null;
+  let textSnap = null;
+  let textSeq = 0;
+  let activeSshTarget = null;
   const baselines = new Map(); // absPath → original content at session start, for ledger "revert" (local mode)
   // Which folder the terminal opens in: defaults to the same place as the watch root; in no-project mode it can point at the home directory,
   // so the shell is immediately usable while the visualization doesn't have to scan all of home.
   const shellCwd = path.resolve(terminalCwd || root);
+  const initialNoProjectRoot = noProject ? root : null;
   // graph / root can be swapped out by reroot (the world tree on the right follows the terminal's cwd), hence let
   let graph = new Graph(root);
   const wss = new WebSocketServer({ port });
@@ -68,6 +174,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   const TERM_PATH = path.join(WEB_DIR, 'terminal.html');
   // Inject the actual WS port + project label into the page, so the frontend can connect to this core and the bottom bar can show what's open
   const projLabel = noProject ? 'no project' : (projectLabel || path.basename(root));
+  let currentProjectLabel = projLabel;
   const injectPort = (html) => html.replace('<head>',
     `<head><script>window.__WS_PORT__=${port};window.__PROJECT_LABEL__=${JSON.stringify(projLabel)};window.__NO_PROJECT__=${noProject ? 'true' : 'false'}</script>`);
   const serveHtml = (res, file, label) => {
@@ -79,7 +186,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       res.end(label + ' cannot read: ' + e.message);
     }
   };
-  const webServer = http.createServer((req, res) => {
+  const webServer = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://localhost');
     // Bundled front-end libraries (xterm, d3) served locally so the app works fully offline — no CDN.
     if (u.pathname.startsWith('/vendor/')) {
@@ -90,6 +197,18 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       catch (e) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('vendor not found'); }
       return;
     }
+    if (req.method === 'POST' && (u.pathname === '/api/text' || u.pathname === '/api/open')) {
+      try {
+        const { json, text } = parseRequestText(await readBody(req));
+        const result = u.pathname === '/api/open'
+          ? await openProjectRequest(json?.root || text, { requestId: json?.requestId || null })
+          : await routeTextRequest(text, { requestId: json?.requestId || null });
+        writeJson(res, result.ok ? 200 : 422, result);
+      } catch (e) {
+        writeJson(res, 500, { ok: false, message: e.message || String(e) });
+      }
+      return;
+    }
     // Full visualization view (the iframe to the right of the terminal loads this; can also be opened standalone)
     if (u.pathname === '/viz') { serveHtml(res, HTML_PATH, 'cosmos.html'); return; }
     // /file?path=rel → return a single file's content (click a cell to drill in and see the code being run)
@@ -97,7 +216,7 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       const rel = u.searchParams.get('path') || '';
       // Remote mode: serve the content fetched over ssh (the file doesn't exist locally)
       if (remote) {
-        const txt = remoteSource?.getContent(rel);
+        const txt = remoteSource?.getContent(rel) ?? remoteSingleContent.get(rel);
         if (typeof txt === 'string') { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }); res.end(txt); }
         else { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not in latest remote scan'); }
         return;
@@ -217,9 +336,294 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   if (lieTimer.unref) lieTimer.unref();
 
   // In remote mode the tree comes from the latest ssh snapshot; otherwise from the local graph.
-  function currentSnapshot() { return remoteSnap || graph.snapshot(); }
+  function currentSnapshot() { return textSnap || remoteSnap || staticSnap || graph.snapshot(); }
   function pushState() {
     broadcast({ type: 'state', payload: currentSnapshot() });
+  }
+
+  function clearTextSnapshot() {
+    textSnap = null;
+  }
+
+  function showTextCells(text) {
+    const cells = cellsFromText(text, { startSeq: textSeq });
+    if (!cells.length) return { ok: false, message: 'no code block found' };
+    textSeq += cells.length;
+    clearTextSnapshot();
+    staticSnap = null;
+    textSnap = {
+      root: 'gpt-text',
+      label: 'GPT text',
+      cells,
+      edges: [],
+      recent: cells.map((c) => ({ timestamp: Date.now(), path: c.path, action: 'active' })),
+    };
+    broadcast({ type: 'project', payload: { root: 'gpt-text', label: 'GPT text' } });
+    pushState();
+    for (const c of cells) broadcast({ type: 'active', payload: { path: c.path, id: c.id } });
+    return { ok: true, kind: 'text', boxes: cells.length };
+  }
+
+  function isBlockedRoot(candidate) {
+    const resolved = path.resolve(expandHome(candidate || ''));
+    const HOME = os.homedir();
+    return resolved === HOME
+      || resolved === path.dirname(HOME)
+      || resolved === path.parse(resolved).root
+      || resolved === '/Users'
+      || resolved === '/Applications'
+      || resolved === '/Library'
+      || resolved === '/System';
+  }
+
+  function cleanRemoteRoot(remoteRoot) {
+    const r = String(remoteRoot || '').trim().replace(/^["'`]|["'`]$/g, '').replace(/\/+$/g, '');
+    return r || '/';
+  }
+
+  function isBroadRemoteRoot(remoteRoot) {
+    const r = cleanRemoteRoot(remoteRoot);
+    return r === '~'
+      || r === '/'
+      || r === '/root'
+      || r === '/home'
+      || r === '/opt'
+      || r === '/var'
+      || r === '/var/www'
+      || r === '/srv'
+      || r === '/tmp'
+      || r === '/usr'
+      || r === '/etc';
+  }
+
+  function projectRootForLocalPath(absPath) {
+    const markers = ['.git', 'package.json', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'composer.json', 'requirements.txt', 'tsconfig.json', 'README.md', 'src'];
+    let dir = fs.existsSync(absPath) && fs.statSync(absPath).isDirectory() ? absPath : path.dirname(absPath);
+    while (dir && !isBlockedRoot(dir)) {
+      for (const m of markers) {
+        try { if (fs.existsSync(path.join(dir, m))) return dir; } catch {}
+      }
+      const parent = path.dirname(dir);
+      if (!parent || parent === dir) break;
+      dir = parent;
+    }
+    return fs.existsSync(absPath) && fs.statSync(absPath).isDirectory() ? absPath : path.dirname(absPath);
+  }
+
+  function focusLocalPath(absPath) {
+    const rel = path.relative(root, absPath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return;
+    try {
+      if (fs.existsSync(absPath) && fs.statSync(absPath).isFile() && graph.isCode(absPath)) {
+        graph.record(absPath, 'active');
+        reparse(absPath);
+        pushState();
+        broadcast({ type: 'active', payload: { path: rel, id: absPath } });
+      }
+    } catch {}
+  }
+
+  function resolveRemoteTarget(host, target) {
+    const script = `
+import json, os, sys
+p=os.path.abspath(os.path.expanduser(sys.argv[1]))
+markers=['.git','package.json','pyproject.toml','Cargo.toml','go.mod','composer.json','requirements.txt','tsconfig.json','README.md','src']
+broad=set(['/','/root','/home','/opt','/var','/var/www','/srv','/tmp','/usr','/etc'])
+if os.path.isdir(p):
+    print(json.dumps({'ok': True, 'kind': 'dir', 'root': p, 'focus': None, 'broad': p.rstrip('/') in broad}))
+    sys.exit(0)
+if not os.path.isfile(p):
+    print(json.dumps({'ok': False, 'message': 'not found: '+p}))
+    sys.exit(0)
+start=os.path.dirname(p)
+cur=start
+found=None
+while True:
+    if any(os.path.exists(os.path.join(cur,m)) for m in markers):
+        found=cur
+        break
+    if cur.rstrip('/') in broad:
+        break
+    parent=os.path.dirname(cur)
+    if not parent or parent==cur:
+        break
+    cur=parent
+root=found or start
+print(json.dumps({'ok': True, 'kind': 'file', 'root': root, 'focus': os.path.relpath(p, root), 'file': p, 'broad': root.rstrip('/') in broad}))
+`;
+    return new Promise((resolve) => {
+      execFile('ssh', [...sshControlArgs({ batch: true }), host, 'python3', '-c', script, target], {
+        env: { ...process.env, ...sshControlEnv() },
+        timeout: 8000,
+        maxBuffer: 1024 * 1024,
+      }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ ok: false, message: (stderr || err.message || 'remote path check failed').trim() });
+          return;
+        }
+        try { resolve(JSON.parse(stdout)); }
+        catch (e) { resolve({ ok: false, message: 'remote path check returned invalid JSON: ' + e.message }); }
+      });
+    });
+  }
+
+  function remoteFileSnapshot(host, fileAbs) {
+    const script = `
+import json, os, sys
+p=os.path.abspath(os.path.expanduser(sys.argv[1]))
+if not os.path.isfile(p):
+    print(json.dumps({'ok': False, 'message': 'not a file: '+p}))
+    sys.exit(0)
+try:
+    with open(p,'r',encoding='utf-8',errors='replace') as f:
+        text=f.read(4096)
+except Exception as e:
+    text=''
+st=os.stat(p)
+print(json.dumps({'ok': True, 'file': p, 'root': os.path.dirname(p), 'name': os.path.basename(p), 'text': text, 'mtime': st.st_mtime}, ensure_ascii=False))
+`;
+    return new Promise((resolve) => {
+      execFile('ssh', [...sshControlArgs({ batch: true }), host, 'python3', '-c', script, fileAbs], {
+        env: { ...process.env, ...sshControlEnv() },
+        timeout: 8000,
+        maxBuffer: 1024 * 1024,
+      }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ ok: false, message: (stderr || err.message || 'remote file read failed').trim() });
+          return;
+        }
+        try { resolve(JSON.parse(stdout)); }
+        catch (e) { resolve({ ok: false, message: 'remote file read returned invalid JSON: ' + e.message }); }
+      });
+    });
+  }
+
+  async function showRemoteFileOnly(host, fileAbs, { requestId = null } = {}) {
+    const r = await remoteFileSnapshot(host, fileAbs);
+    if (!r.ok) return { ok: false, requestId, message: r.message || 'cannot read remote file' };
+    clearTextSnapshot();
+    staticSnap = null;
+    remoteFocusRel = r.name;
+    remoteSingleContent = new Map([[r.name, r.text || '']]);
+    if (watcher) { try { watcher.close(); } catch {} watcher = null; }
+    if (remoteSource) { remoteSource.stop(); remoteSource = null; }
+    remote = { host, root: r.root };
+    currentProjectLabel = `${host}:${r.name}`;
+    const ext = path.extname(r.name).replace(/^\./, '') || 'txt';
+    remoteSnap = {
+      root: `${host}:${r.root}`,
+      label: currentProjectLabel,
+      remote: true,
+      scanMode: 'remote-file',
+      cells: [{
+        id: r.name,
+        path: r.name,
+        language: ext,
+        size_lines: r.text ? String(r.text).split('\n').length : 0,
+        preview: String(r.text || '').replace(/\t/g, '  ').split('\n').slice(0, 10).join('\n'),
+        category: 'file',
+        status: 'active',
+        modification_count: 0,
+        anomaly: null,
+        lastModified: r.mtime * 1000,
+      }],
+      edges: [],
+      recent: [{ timestamp: Date.now(), path: r.name, action: 'active' }],
+    };
+    broadcast({ type: 'project', payload: { root: `${host}:${r.root}`, label: currentProjectLabel, remote: true, fileOnly: true } });
+    pushState();
+    broadcast({ type: 'active', payload: { path: r.name, id: r.name } });
+    return { ok: true, requestId, kind: 'remote-file', root: `${host}:${r.root}`, focus: r.name };
+  }
+
+  async function openProjectRequest(target, { requestId = null } = {}) {
+    const raw = String(target || '').trim();
+    if (!raw) return { ok: false, requestId, message: 'missing project path' };
+    const remoteSpec = remoteSpecFromText(raw);
+    if (remoteSpec) {
+      const resolvedRemote = await resolveRemoteTarget(remoteSpec.host, remoteSpec.root);
+      if (resolvedRemote.ok) {
+        if (resolvedRemote.broad && !resolvedRemote.focus) {
+          return { ok: false, requestId, message: `refusing to scan broad remote root: ${remoteSpec.host}:${resolvedRemote.root}` };
+        }
+        if (resolvedRemote.broad && resolvedRemote.file) {
+          return showRemoteFileOnly(remoteSpec.host, resolvedRemote.file, { requestId });
+        }
+        clearTextSnapshot();
+        enterRemote(remoteSpec.host, resolvedRemote.root, { focus: resolvedRemote.focus || null, explicit: true });
+        return {
+          ok: true,
+          requestId,
+          kind: 'remote',
+          root: `${remoteSpec.host}:${resolvedRemote.root}`,
+          focus: resolvedRemote.focus || null,
+        };
+      }
+      clearTextSnapshot();
+      if (isBroadRemoteRoot(remoteSpec.root)) {
+        return { ok: false, requestId, message: `refusing to scan broad remote root: ${remoteSpec.host}:${remoteSpec.root}` };
+      }
+      enterRemote(remoteSpec.host, remoteSpec.root, { explicit: true });
+      return { ok: true, requestId, kind: 'remote', root: `${remoteSpec.host}:${remoteSpec.root}` };
+    }
+    const resolved = path.resolve(expandHome(raw));
+    if (isBlockedRoot(resolved)) return { ok: false, requestId, message: 'refusing to scan an over-broad root' };
+    let st = null;
+    try {
+      if (!fs.existsSync(resolved)) {
+        return { ok: false, requestId, message: `not found: ${resolved}` };
+      }
+      st = fs.statSync(resolved);
+    } catch (e) {
+      return { ok: false, requestId, message: e.message || String(e) };
+    }
+    const targetIsFile = st.isFile();
+    const projectRoot = targetIsFile ? projectRootForLocalPath(resolved) : resolved;
+    if (isBlockedRoot(projectRoot)) return { ok: false, requestId, message: 'refusing to scan an over-broad root' };
+    clearTextSnapshot();
+    if (remote) exitRemote();
+    if (projectRoot === root) {
+      if (!watcher && !staticSnap) attachWatcher();
+      broadcast({ type: 'project', payload: { root, label: path.basename(root) || root } });
+      pushState();
+    } else {
+      reroot(projectRoot);
+    }
+    if (targetIsFile) focusLocalPath(resolved);
+    return { ok: true, requestId, kind: 'local', root: projectRoot, focus: targetIsFile ? path.relative(projectRoot, resolved) : null };
+  }
+
+  async function routeTextRequest(text, { requestId = null } = {}) {
+    const raw = String(text || '').trim();
+    if (!raw) return { ok: false, requestId, message: 'empty request' };
+    const remoteSpec = remoteSpecFromText(raw);
+    if (remoteSpec) return openProjectRequest(`${remoteSpec.host}:${remoteSpec.root}`, { requestId });
+    const directPath = projectPathFromText(raw);
+    if (directPath) {
+      const host = remote?.host || activeSshTarget;
+      if (host) {
+        const localPath = path.resolve(expandHome(directPath));
+        try {
+          if (!fs.existsSync(localPath)) return openProjectRequest(`${host}:${directPath}`, { requestId });
+        } catch {
+          return openProjectRequest(`${host}:${directPath}`, { requestId });
+        }
+      }
+      return openProjectRequest(directPath, { requestId });
+    }
+    const name = projectNameFromText(raw);
+    if (name) {
+      const local = findLocalProjectByName(name);
+      if (local) return openProjectRequest(local, { requestId });
+      const host = remote?.host || activeSshTarget;
+      if (host) {
+        const found = await findRemoteProject(host, name);
+        if (found) return openProjectRequest(`${host}:${found}`, { requestId });
+      }
+    }
+    const textResult = showTextCells(raw);
+    if (textResult.ok) return { ...textResult, requestId };
+    return { ok: false, requestId, message: 'no project path/name or code block detected' };
   }
 
   // ── Agent runner: lets the browser (or CLI) dispatch a prompt over WS, with the agent running here in core ──
@@ -278,8 +682,59 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     } catch {}
   }
 
+  const WATCH_FILE_LIMIT = Number(process.env.CODETREE_WATCH_FILE_LIMIT || 5000);
+  const STATIC_SCAN_LIMIT = Number(process.env.CODETREE_STATIC_SCAN_LIMIT || 5000);
+  function countCodeFiles(dir, cap = WATCH_FILE_LIMIT + 1) {
+    const stack = [dir];
+    let count = 0;
+    while (stack.length) {
+      const cur = stack.pop();
+      let entries = [];
+      try { entries = fs.readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+      for (const ent of entries) {
+        const abs = path.join(cur, ent.name);
+        if (ent.isDirectory()) {
+          if (!isIgnored(abs)) stack.push(abs);
+        } else if (ent.isFile() && CODE_EXT.includes(path.extname(ent.name).toLowerCase())) {
+          count++;
+          if (count >= cap) return count;
+        }
+      }
+    }
+    return count;
+  }
+
+  function staticScan(reason = 'large-project') {
+    try {
+      staticSnap = scanLocalProject(root, { limit: STATIC_SCAN_LIMIT });
+      const idByPath = new Map(staticSnap.cells.map((c) => [c.path, c.id]));
+      staticSnap.edges = staticSnap.edges.map((e) => ({
+        ...e,
+        from: idByPath.get(e.from) || e.from,
+        to: idByPath.get(e.to) || e.to,
+      }));
+      staticSnap.scanMode = 'static';
+      staticSnap.reason = reason;
+      staticSnap.scannedAt = Date.now();
+      log(`static scan complete: ${staticSnap.cells.length} file nodes, ${staticSnap.edges.length} dependency edges${staticSnap.truncated ? ' (truncated)' : ''}`);
+      pushState();
+    } catch (e) {
+      staticSnap = { root, cells: [], edges: [], error: e.message || String(e), scanMode: 'static' };
+      broadcast({ type: 'agent_error', payload: { message: `Static scan failed: ${staticSnap.error}` } });
+      pushState();
+    }
+  }
+
   function attachWatcher() {
     ready = false;
+    staticSnap = null;
+    if (initialNoProjectRoot && root === initialNoProjectRoot) {
+      log('no-project scratch mode — keeping the tree empty until the shell cd/ssh enters a project');
+      ready = true;
+      watcher = null;
+      pushState();
+      return;
+    }
     // Safety net: never recursively watch the home directory, '/Users', or a volume root. chokidar would try
     // to traverse hundreds of thousands of files and saturate the event loop — the web server stops responding
     // and the app window never loads. Leave the tree empty but the app alive; cwd-follow repoints it the
@@ -290,6 +745,14 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       ready = true;
       watcher = null;
       pushState();
+      return;
+    }
+    const estimatedFiles = countCodeFiles(root);
+    if (estimatedFiles > WATCH_FILE_LIMIT) {
+      log(`project has at least ${estimatedFiles} files; using scan-only tree instead of opening thousands of file watchers`);
+      ready = true;
+      watcher = null;
+      staticScan('too-many-files-for-watch');
       return;
     }
     ensureEngineLib(root); // runs on first start and on every reroot (cd into a new project)
@@ -354,13 +817,35 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
   // Switch the world-tree to a remote project over ssh (poll instead of watching the local FS).
   // Called automatically when the terminal ssh's into a host and cd's into a project (auto-follow),
   // or manually via a remote target. No-ops if already on this host:root.
-  function enterRemote(host, root) {
-    root = String(root || '').replace(/\/$/, '');
-    if (!host || !root || root === '~' || root === '/') return;
-    if (remote && remote.host === host && remote.root === root) return;
+  function enterRemote(host, root, options = {}) {
+    root = cleanRemoteRoot(root);
+    if (!host || !root || root === '~' || root === '/') return false;
+    if (isBroadRemoteRoot(root)) {
+      log(`skip remote broad root ${host}:${root}; waiting for a real project path`);
+      if (watcher) { try { watcher.close(); } catch {} watcher = null; }
+      if (remoteSource) { remoteSource.stop(); remoteSource = null; }
+      remote = { host, root };
+      remoteFocusRel = null;
+      remoteSnap = { root: `${host}:${root}`, remote: true, cells: [], edges: [], recent: [], scanMode: 'remote-empty', reason: 'broad-root' };
+      currentProjectLabel = `${host}:${root}`;
+      broadcast({ type: 'project', payload: { root: `${host}:${root}`, label: `${host}:${root}`, remote: true, waitingForProject: true } });
+      pushState();
+      return false;
+    }
+    if (remote && remote.host === host && remote.root === root) {
+      if (options.focus) {
+        remoteFocusRel = options.focus;
+        broadcast({ type: 'active', payload: { path: remoteFocusRel, id: remoteFocusRel } });
+      }
+      return true;
+    }
+    clearTextSnapshot();
+    staticSnap = null;
+    remoteFocusRel = options.focus || null;
     if (watcher) { try { watcher.close(); } catch {} watcher = null; }
     if (remoteSource) { remoteSource.stop(); remoteSource = null; }
     remote = { host, root };
+    currentProjectLabel = `${host}:${root.split('/').pop()}`;
     remoteSnap = null;
     log(`auto-follow → remote ${host}:${root}`);
     remoteSource = createRemoteSource({
@@ -368,6 +853,10 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       onSnapshot: (snap) => {
         remoteSnap = snap;
         broadcast({ type: 'state', payload: snap });
+        if (remoteFocusRel && snap.cells.some((c) => c.path === remoteFocusRel)) {
+          broadcast({ type: 'active', payload: { path: remoteFocusRel, id: remoteFocusRel } });
+          return;
+        }
         if (snap.changed && snap.changed.length) {
           // Light up each changed/new file (card glows + code streams in) and fly the camera to the newest —
           // so when the agent writes or creates a file on the remote, the world-tree jumps to that cell.
@@ -377,20 +866,25 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       },
       onStatus: (s) => {
         if (s.ok) log(`remote scan: ${s.files} files on ${s.host}:${s.root}`);
-        else broadcast({ type: 'agent_error', payload: { message: `Remote (${s.host}): ${s.error}` } });
+        else {
+          log(`remote scan failed on ${s.host}:${s.root}: ${s.error}`);
+          broadcast({ type: 'agent_error', payload: { message: `Remote (${s.host}): ${s.error}` } });
+        }
       },
     });
     remoteSource.start();
-    broadcast({ type: 'project', payload: { root: `${host}:${root}`, label: `${host}:${root.split('/').pop()}`, remote: true } });
+    broadcast({ type: 'project', payload: { root: `${host}:${root}`, label: currentProjectLabel, remote: true } });
+    return true;
   }
   // Back to the local project when the ssh session ends.
   function exitRemote() {
     if (!remote) return;
     log('auto-follow ← back to local');
     if (remoteSource) { remoteSource.stop(); remoteSource = null; }
-    remote = null; remoteSnap = null;
+    remote = null; remoteSnap = null; staticSnap = null;
+    currentProjectLabel = path.basename(root);
     attachWatcher();
-    broadcast({ type: 'project', payload: { root, label: projLabel } });
+    broadcast({ type: 'project', payload: { root, label: currentProjectLabel } });
   }
 
   if (remote) {
@@ -405,24 +899,31 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     if (remote) return; // in remote mode the tree is pinned to the remote project, local cd doesn't reroot
     const resolved = path.resolve(newDir);
     if (resolved === root) return;
+    clearTextSnapshot();
+    staticSnap = null;
     log('reroot ->', resolved);
     root = resolved;
+    currentProjectLabel = path.basename(root);
     if (watcher) { try { watcher.close(); } catch {} }
     graph = new Graph(root);
     if (!runner.busy) runner = makeRunner(); // only swap the runner when idle, to avoid interrupting a running agent
     attachWatcher();
-    broadcast({ type: 'project', payload: { root, label: path.basename(root) } });
+    broadcast({ type: 'project', payload: { root, label: currentProjectLabel } });
   }
 
   // ── Follow the terminal's cwd: when the shell cd's into a project, the right side auto-switches root. Non-invasive (doesn't modify the user's shell) ──
   let cwdTimer = null, followPid = null, lastCwd = shellCwd;
   function shellCwdOf(pid) {
     return new Promise((res) => {
-      execFile('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { timeout: 1500 }, (err, out) => {
-        if (err) return res(null);
-        const line = String(out).split('\n').find((l) => l[0] === 'n');
-        res(line ? line.slice(1) : null);
-      });
+      try {
+        execFile('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { timeout: 1500 }, (err, out) => {
+          if (err) return res(null);
+          const line = String(out).split('\n').find((l) => l[0] === 'n');
+          res(line ? line.slice(1) : null);
+        });
+      } catch {
+        res(null);
+      }
     });
   }
   // A directory is worth growing a tree for if it has a project marker OR simply contains code (directly or in src/).
@@ -440,8 +941,18 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     } catch { return false; }
   }
   function startCwdFollow(pid) {
-    if (cwdTimer) return;
     followPid = pid;
+    const adopt = async () => {
+      if (!followPid) return;
+      const cwd = await shellCwdOf(followPid);
+      if (!cwd) return;
+      lastCwd = cwd;
+      // Don't reroot to the home directory itself — it's not a project and scanning all of $HOME is slow/noisy.
+      const resolved = path.resolve(cwd);
+      if (resolved !== os.homedir() && looksLikeProject(cwd) && resolved !== root) reroot(cwd);
+    };
+    adopt();
+    if (cwdTimer) return;
     cwdTimer = setInterval(async () => {
       if (!followPid) return;
       const cwd = await shellCwdOf(followPid);
@@ -545,8 +1056,8 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
     ws.send(JSON.stringify({ type: 'state', payload: currentSnapshot() }));
     // Also tell a freshly-connected client WHICH project we're on, so its header/label isn't stuck on
     // "no project" when we're already following a remote (the tree arrives via the state above).
-    if (remote) ws.send(JSON.stringify({ type: 'project', payload: { root: `${remote.host}:${remote.root}`, label: `${remote.host}:${remote.root.split('/').pop()}`, remote: true } }));
-    else ws.send(JSON.stringify({ type: 'project', payload: { root, label: projLabel } }));
+    if (remote) ws.send(JSON.stringify({ type: 'project', payload: { root: `${remote.host}:${remote.root}`, label: currentProjectLabel, remote: true } }));
+    else ws.send(JSON.stringify({ type: 'project', payload: { root, label: currentProjectLabel } }));
     ws.send(JSON.stringify({ type: 'tokens', payload: tokensSnapshot() }));
     // One connection can hold several independent shells (tabs). Each is keyed by a sessionId from the page.
     const ptys = new Map(); // sessionId → { pty, slog, sshTarget, outbuf }
@@ -568,10 +1079,25 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       // node-pty's spawn-helper can be blocked by macOS (Gatekeeper/hardened-runtime after an ad-hoc re-sign),
       // throwing "posix_spawnp failed". That must NOT kill the whole core (which would blank the command line and
       // the tree). Catch it, tell the page the terminal is unavailable, and keep the visualization alive.
+      function ptyEnv() {
+        const env = { ...process.env };
+        delete env.NO_COLOR;
+        env.TERM = env.TERM && env.TERM.includes('256') ? env.TERM : 'xterm-256color';
+        env.COLORTERM = env.COLORTERM || 'truecolor';
+        env.CLICOLOR = '1';
+        env.CLICOLOR_FORCE = '1';
+        env.FORCE_COLOR = env.FORCE_COLOR || '3';
+        env.GREP_COLORS = env.GREP_COLORS || 'mt=01;38;5;214:ms=01;38;5;214:mc=01;38;5;214';
+        env.LSCOLORS = env.LSCOLORS || 'Gxfxcxdxbxegedabagacad';
+        env.LS_COLORS = env.LS_COLORS || 'di=1;34:ln=36:so=35:pi=33:ex=32:bd=33;01:cd=33;01:su=37;41:sg=30;43:tw=30;42:ow=34;42:ex=32';
+        env.CODETREE_TERMINAL = '1';
+        Object.assign(env, sshControlEnv());
+        return env;
+      }
       let pty;
       try {
         const cwdSafe = (() => { try { return fs.existsSync(shellCwd) && fs.statSync(shellCwd).isDirectory() ? shellCwd : os.homedir(); } catch { return os.homedir(); } })();
-        pty = mod.spawn(shell, loginArgs, { name: 'xterm-color', cols: cols || 80, rows: rows || 24, cwd: cwdSafe, env: process.env });
+        pty = mod.spawn(shell, loginArgs, { name: 'xterm-256color', cols: cols || 80, rows: rows || 24, cwd: cwdSafe, env: ptyEnv() });
       } catch (e) {
         log('pty spawn failed (terminal unavailable, tree still works):', e && e.message);
         try { ws.send(JSON.stringify({ type: 'pty_missing' })); } catch {}
@@ -613,13 +1139,27 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
         entry.inbuf = entry.inbuf.slice(nl + 1);
         if (line.trim()) { lieUserBuf += line + '\n'; if (lieUserBuf.length > 3000) lieUserBuf = lieUserBuf.slice(-3000); } // what you asked = the instruction
         const m = line.match(/^\s*ssh\s+(?:-\S+\s+|-\S+\s*)*([\w.@-]+(?::\d+)?)\s*$/) || line.match(/^\s*ssh\s+(?:\S+\s+)*?([\w.@-]+)\s*$/);
-        if (m && m[1] && !/^-/.test(m[1])) entry.sshTarget = m[1];
+        if (m && m[1] && !/^-/.test(m[1])) { entry.sshTarget = m[1]; activeSshTarget = m[1]; }
         // user explicitly leaves the ssh session → tree goes back to the local project (robust; ignores flaky disconnects)
-        if (entry.sshTarget && /^\s*(exit|logout)\s*$/.test(line)) { entry.sshTarget = null; entry.outbuf = ''; exitRemote(); }
+        if (entry.sshTarget && /^\s*(exit|logout)\s*$/.test(line)) { entry.sshTarget = null; activeSshTarget = null; entry.outbuf = ''; exitRemote(); }
       }
       // Ctrl-D also ends the shell
-      if (entry.sshTarget && data.includes('\x04')) { entry.sshTarget = null; entry.outbuf = ''; exitRemote(); }
+      if (entry.sshTarget && data.includes('\x04')) { entry.sshTarget = null; activeSshTarget = null; entry.outbuf = ''; exitRemote(); }
       if (entry.inbuf.length > 400) entry.inbuf = entry.inbuf.slice(-400);
+    }
+    function writePtyInput(entry, data) {
+      const s = String(data || '');
+      if ((s === '\r' || s === '\n') && entry.inbuf.trim().startsWith('ssh')) {
+        const rewritten = injectSshControlIntoCommand(entry.inbuf);
+        if (rewritten && rewritten !== entry.inbuf) {
+          entry.pty.write('\x15' + rewritten + '\r');
+          entry.inbuf = '';
+          detectSshFromInput(entry, rewritten + '\n');
+          return;
+        }
+      }
+      entry.pty.write(data);
+      detectSshFromInput(entry, data);
     }
     // Figure out WHICH project the terminal is working in from whatever it prints — covers an in-terminal agent
     // (claude/codex) doing its own ssh/edits, plain shells, scp/rsync, host:/path mentions, cd, git -C, etc.
@@ -631,13 +1171,16 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       draftStream.feed(clean); // and to the live draft-cell watcher: code on screen → unnamed cell → named on save
       // (a) precise: you ssh'd in OUR shell → follow the remote prompt's cwd
       if (entry.sshTarget) {
+        activeSshTarget = entry.sshTarget;
         const last = entry.outbuf.split('\n').pop();
         const p = PROMPT_RE.exec(last || '');
         if (p && p[3].startsWith('/')) { enterRemote(entry.sshTarget, p[3]); return; }
       }
       // (b) inferred: read every signal in the recent output and follow the project it points at
       const tr = traceProject(entry.outbuf, { sshAliases: SSH_ALIASES });
-      if (tr.host && tr.root) { enterRemote(tr.host, tr.root); return; }
+      // In terminal-only/no-project mode, do not let stale text or an agent's prose silently jump to an old VPS tree.
+      // A remote tree should start from a real ssh command/prompt, or from an explicit open request.
+      if (tr.host && tr.root && (!noProject || entry.sshTarget || activeSshTarget)) { enterRemote(tr.host, tr.root); return; }
       // (c) local project the agent is editing (e.g. claude Edit(/abs/path)) that our shell never cd'd into.
       // Guard hard: never reroot to a system dir (/tmp, /var, …) and only follow somewhere that looks like a
       // real project — otherwise we'd point the watcher at junk (and choke on sockets/IPC files there).
@@ -661,10 +1204,29 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
       if (msg.type === 'pty_start') { startPty(msg.sessionId, msg.cols, msg.rows); return; }
       if (msg.type === 'pty_input') {
         const e = ptys.get(msg.sessionId || 'default');
-        if (e) { e.pty.write(msg.data); detectSshFromInput(e, msg.data); }
+        if (e) writePtyInput(e, msg.data);
         return;
       }
       if (msg.type === 'pty_resize') { try { ptys.get(msg.sessionId || 'default')?.pty.resize(msg.cols, msg.rows); } catch {} return; }
+      if (msg.type === 'visible_terminal_output') {
+        const sessionId = msg.sessionId || activePtyId || 'default';
+        const data = String(msg.data || '');
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pty_output', sessionId, data }));
+        return;
+      }
+      if (msg.type === 'agent_prompt_submit') {
+        const sessionId = msg.sessionId || activePtyId || 'default';
+        const e = ptys.get(sessionId);
+        const text = String(msg.text || '');
+        ws.send(JSON.stringify({ type: 'agent_prompt_passthrough', sessionId, payload: { kind: 'command', text } }));
+        if (e && text.trim()) {
+          const line = text.replace(/\r?\n$/, '');
+          const rewritten = injectSshControlIntoCommand(line) || line;
+          e.pty.write(rewritten + '\r');
+          detectSshFromInput(e, rewritten + '\n');
+        }
+        return;
+      }
       // Switching tabs: the world-tree follows whichever shell is now in front (local cwd or its ssh session).
       if (msg.type === 'tab_active') {
         const e = ptys.get(msg.sessionId || 'default');
@@ -686,7 +1248,20 @@ export function startCore({ root = process.cwd(), port = WS_PORT, webPort = WEB_
 
   // The CLI side reports agent actions (read / prompt) back in, as a secondary signal
   function handleInbound(msg) {
-    if (msg.type === 'agent_read' && msg.path) {
+    if (msg.type === 'project_open') {
+      openProjectRequest(msg.root || msg.path || msg.text, { requestId: msg.requestId || null })
+        .then((r) => broadcast({ type: 'project_open_ack', payload: r }))
+        .catch((e) => broadcast({ type: 'project_open_ack', payload: { ok: false, requestId: msg.requestId || null, message: e.message || String(e) } }));
+    } else if (msg.type === 'gpt_text' || msg.type === 'text_ingest') {
+      const r = showTextCells(msg.text || msg.prompt || '');
+      broadcast({ type: 'text_ingest_ack', payload: r });
+    } else if (msg.type === 'gpt_prompt' || msg.type === 'project_prompt') {
+      routeTextRequest(msg.text || msg.prompt || '', { requestId: msg.requestId || null })
+        .then((r) => broadcast({ type: 'gpt_prompt_ack', payload: r }))
+        .catch((e) => broadcast({ type: 'gpt_prompt_ack', payload: { ok: false, requestId: msg.requestId || null, message: e.message || String(e) } }));
+    } else if (msg.type === 'visible_test') {
+      broadcast({ type: 'visible_test_ack', payload: msg.payload || {} });
+    } else if (msg.type === 'agent_read' && msg.path) {
       const abs = path.resolve(root, msg.path);
       const cell = graph.record(abs, 'read', msg.prompt_id);
       emitActivity(cell, 'read');

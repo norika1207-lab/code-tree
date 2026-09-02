@@ -23,8 +23,15 @@ export const CODE_EXT = [
 export const IGNORE_DIRS = [
   'node_modules',
   '.git',
+  // macOS protected personal-media folders: never walk these during auto-discovery.
+  'Music',
+  'Movies',
+  'Pictures',
+  'Photos Library.photoslibrary',
+  'Photo Booth Library',
   'dist',
   'build',
+  'release',
   '.next',
   'coverage',
   '.cosmos-tree',
@@ -36,8 +43,13 @@ export const IGNORE_DIRS = [
 // chokidar v4 dropped glob support; ignored only accepts a function/regex.
 // This predicate: skip the path if any segment matches an ignored directory name.
 const IGNORE_RE = new RegExp(`(^|[\\\\/])(${IGNORE_DIRS.join('|')})([\\\\/]|$)`);
+// AppleDouble files: macOS / Dropbox sprinkle ._FOO next to FOO; they're metadata, not source.
+const APPLE_DOUBLE_RE = /(^|[\\\/])\._[^\\\/]+$/;
 export function isIgnored(p) {
-  return IGNORE_RE.test(p);
+  if (!p) return false;
+  if (IGNORE_RE.test(p)) return true;
+  if (APPLE_DOUBLE_RE.test(p)) return true;
+  return false;
 }
 
 // Anomaly detection thresholds (matching the spec's MVP rules)

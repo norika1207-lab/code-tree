@@ -34,14 +34,34 @@ function resolveJs(fromFile, spec, root) {
 }
 
 function resolvePy(fromFile, spec, root) {
-  if (!spec.startsWith('.')) return null; // only resolve relative imports
-  const dots = spec.match(/^\.+/)[0].length;
-  const rest = spec.slice(dots).replace(/\./g, path.sep);
-  let dir = path.dirname(fromFile);
-  for (let i = 1; i < dots; i++) dir = path.dirname(dir);
-  const base = path.join(dir, rest);
-  for (const cand of [base + '.py', path.join(base, '__init__.py')]) {
-    if (fs.existsSync(cand)) return cand;
+  const tryBase = (base) => {
+    for (const cand of [base + '.py', path.join(base, '__init__.py')]) {
+      if (fs.existsSync(cand)) return cand;
+    }
+    return null;
+  };
+  if (spec.startsWith('.')) {
+    const dots = spec.match(/^\.+/)[0].length;
+    const rest = spec.slice(dots).replace(/\./g, path.sep);
+    let dir = path.dirname(fromFile);
+    for (let i = 1; i < dots; i++) dir = path.dirname(dir);
+    return tryBase(path.join(dir, rest));
+  }
+  // Python projects often run with a package directory on PYTHONPATH, so imports like
+  // `import gcal_service` or `from alfred_core import ...` should still draw local links.
+  const rel = spec.replace(/\./g, path.sep);
+  const seen = new Set();
+  const bases = [];
+  const push = (base) => { if (!seen.has(base)) { seen.add(base); bases.push(base); } };
+  for (let dir = path.dirname(fromFile); dir && dir.startsWith(root); dir = path.dirname(dir)) {
+    push(path.join(dir, rel));
+    if (dir === root) break;
+  }
+  push(path.join(root, rel));
+  for (const d of ['src', 'lib', 'app', 'backend', 'server', 'core']) push(path.join(root, d, rel));
+  for (const base of bases) {
+    const resolved = tryBase(base);
+    if (resolved) return resolved;
   }
   return null;
 }

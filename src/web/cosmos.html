@@ -16,30 +16,37 @@
       radial-gradient(1100px 760px at 70% 12%, #122138 0%, rgba(18,33,56,0) 60%),
       radial-gradient(900px 700px at 20% 95%, #0d1a2a 0%, rgba(13,31,26,0) 55%),
       linear-gradient(180deg, #070c16 0%, #060a12 60%, #04070d 100%); }
-  #stars { position:fixed; inset:0; z-index:0; opacity:.5; }
+  #stars { display:none; }
   svg#tree { position:fixed; inset:0; z-index:1; display:block; cursor:grab; width:100%; height:100%; }
   svg#tree:active { cursor:grabbing; }
 
-  .panel { position:fixed; z-index:5; background:rgba(11,17,28,.55);
+  .panel { position:fixed; z-index:5; background:rgba(11,17,28,.86);
     border:1px solid rgba(120,160,220,.18); border-radius:16px;
-    backdrop-filter:blur(18px) saturate(140%); -webkit-backdrop-filter:blur(18px) saturate(140%);
-    box-shadow:0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06); }
+    backdrop-filter:none; -webkit-backdrop-filter:none;
+    box-shadow:0 8px 24px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.04); }
 
-  #hud { top:22px; left:22px; padding:16px 20px; min-width:280px; }
-  #hud .brand { display:flex; align-items:center; gap:9px; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--ink); }
-  #hud .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--neon); box-shadow:0 0 14px var(--neon); animation:beat 1.6s ease-in-out infinite; }
+  #hud { top:16px; left:16px; padding:7px 9px; width:min(236px,calc(100% - 112px)); min-width:0; border-radius:9px; }
+  #hud .brand { display:flex; align-items:center; gap:6px; font-size:9px; letter-spacing:1.45px; text-transform:uppercase; color:var(--ink); }
+  #hud .brand .dot { width:7px; height:7px; border-radius:2px; background:var(--neon); box-shadow:0 0 10px var(--neon); }
   @keyframes beat { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.65)} }
-  #hud .label { margin-top:13px; font-size:11px; letter-spacing:1px; color:var(--ink); opacity:.6; }
-  #hud .file { margin-top:4px; font-size:19px; font-weight:650; color:#fff; word-break:break-all; text-shadow:0 0 12px rgba(92,200,255,.25); }
+  #hud .label { display:none; }
+  #hud .file { margin-top:4px; font-size:13px; line-height:1.15; font-weight:650; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 0 12px rgba(92,200,255,.25); }
   #hud .file.idle { color:#6b7689; text-shadow:none; }
-  #hud .meta { margin-top:8px; font-size:12px; color:var(--ink); opacity:.8; }
+  #hud .meta { display:none; }
   #hud .meta b { color:#fff; }
 
-  #legend { bottom:22px; left:22px; padding:12px 15px; display:flex; flex-direction:column; gap:7px; }
-  #legend .row { display:flex; align-items:center; gap:9px; font-size:12px; color:var(--ink); }
-  #legend .sw { width:11px; height:11px; border-radius:50%; }
+  /* Docked at the very bottom as a full-width bar — two horizontal rows (狀態燈 / 格子重要性), never floating over the cells. */
+  #legend { left:0; right:0; bottom:0; top:auto; width:auto; max-width:none; padding:7px 16px;
+    display:flex; flex-direction:column; gap:5px; border:0; border-top:1px solid rgba(120,160,220,.18);
+    border-radius:0; opacity:1; background:rgba(6,10,17,.97); box-shadow:0 -6px 22px rgba(0,0,0,.45); }
+  #legend .line { display:flex; flex-wrap:wrap; align-items:center; gap:7px 15px; }
+  #legend .cap { flex:0 0 auto; min-width:60px; font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:#657893;
+    margin:0; padding:0; border:0; }
+  #legend .item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink); white-space:nowrap; }
+  #legend .item b { color:#e6f0ff; font-weight:700; }
+  #legend .sw { width:9px; height:9px; border-radius:2px; flex:0 0 auto; }
 
-  #conn { top:22px; right:22px; padding:8px 13px; font-size:12px; display:flex; align-items:center; gap:8px; }
+  #conn { top:18px; right:18px; padding:8px 13px; font-size:12px; display:flex; align-items:center; gap:8px; border-radius:10px; }
   #conn .dot { width:8px; height:8px; border-radius:50%; background:#ff6b81; box-shadow:0 0 10px #ff6b81; }
   #conn.on .dot { background:var(--neon); box-shadow:0 0 10px var(--neon); }
 
@@ -53,27 +60,28 @@
   .dotlabel { font-size:12px; fill:#aebfd9; paint-order:stroke; stroke:#060a12; stroke-width:2.5px; cursor:pointer; }
   .filebox { transition:stroke .18s, filter .18s; }
   .dot:hover .filebox { fill:#142033; stroke:#8fd9ff; }
-  .boxlabel { font-size:12px; fill:#cfe0ff; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; pointer-events:none; }
+  .boxlabel { font-size:9.4px; font-weight:700; fill:#dce9ff; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; pointer-events:none; }
+  .boxsub { font-size:7.8px; fill:#8ea1bd; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; pointer-events:none; }
 
   /* File = a code-editor window tile */
-  .fcard { width:210px; height:152px; border-radius:9px; overflow:hidden; cursor:pointer;
+  .fcard { width:248px; height:174px; border-radius:7px; overflow:hidden; cursor:pointer;
     background:rgba(18,26,42,.98); border:1.5px solid rgba(150,185,235,.55);
     box-shadow:0 10px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(150,185,235,.12); display:flex; flex-direction:column;
     transition:border-color .18s, box-shadow .18s, transform .18s; }
   .fcard:hover { border-color:#8fd9ff; box-shadow:0 12px 36px rgba(0,0,0,.62); transform:translateY(-2px); }
   /* a label row, not a window title bar: no solid chrome, blends into the card */
-  .fcard .hd { display:flex; align-items:center; gap:7px; padding:7px 10px 5px; flex:0 0 auto;
-    font:600 11px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#cfe0ff; }
+  .fcard .hd { display:flex; align-items:center; gap:7px; padding:8px 11px 6px; flex:0 0 auto;
+    font:600 11.5px/1.3 "SF Mono",ui-monospace,Menlo,monospace; color:#dce9ff; }
   /* one status dot, color = real state (not decorative window buttons): gray idle, amber editing/changed, red anomaly */
-  .fcard .hd .st { width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:#3a4860; }
+  .fcard .hd .st { width:7px; height:7px; border-radius:2px; flex:0 0 auto; background:#3a4860; }
   .fcard.active .st { background:var(--neon); box-shadow:0 0 8px var(--neon); }
   .fcard.modified .st { background:var(--amber); box-shadow:0 0 7px var(--amber); }
   .fcard.error .st { background:var(--red); box-shadow:0 0 8px var(--red); }
   .fcard .hd .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .fcard .hd .badge { margin-left:auto; flex:0 0 auto; font-size:9px; font-weight:700;
     padding:1px 6px; border-radius:5px; white-space:nowrap; }
-  .fcard .bd { flex:1; overflow:hidden; padding:7px 10px; margin:0;
-    font:9px/1.44 "SF Mono",ui-monospace,Menlo,monospace; color:#93a9c8; white-space:pre; }
+  .fcard .bd { flex:1; overflow:hidden; padding:8px 11px 10px; margin:0;
+    font:10px/1.45 "SF Mono",ui-monospace,Menlo,monospace; color:#b6c6df; white-space:pre; }
   .fcard.active { border-color:var(--neon); box-shadow:0 0 0 2px var(--neon),0 0 16px rgba(92,200,255,.32); }
   .fcard.active .badge { background:var(--neon); color:#04130c; }
   .fcard.modified { border-color:var(--amber); }
@@ -100,10 +108,18 @@
   .fcard .hd .seq { flex:0 0 auto; font-size:10px; font-weight:800; color:#9fb4d6;
     background:rgba(120,160,220,.16); border-radius:5px; padding:1px 6px; letter-spacing:.3px; }
   .fcard.first .hd .seq { background:#46587a; color:#dce8fb; box-shadow:none; }
+  .fcard.critical { border-color:#d58cff; box-shadow:0 0 0 1px rgba(213,140,255,.25),0 10px 30px rgba(0,0,0,.55); }
+  .fcard.entry { border-color:#66d990; }
+  .fcard.config { border-color:#72a7ff; }
+  .fcard.asset { border-color:#5ed7ff; }
+  .fcard.doc { border-color:#9fb4d6; }
   /* Blast radius: hover a tile to mark who gets hit if you change it */
   .fcard.epicenter { border-color:#5fd0ff !important; box-shadow:0 0 0 2px #5fd0ff,0 0 30px rgba(95,208,255,.55) !important; }
   .fcard.atrisk { border-color:#ff9d4d !important; box-shadow:0 0 0 2px rgba(255,157,77,.85),0 0 22px rgba(255,157,77,.4) !important; }
   .fcard.faded { opacity:.32 !important; }
+  .dot.epicenter .filebox { stroke:#5fd0ff !important; stroke-width:2.4px !important; filter:url(#leafglow); }
+  .dot.atrisk .filebox { stroke:#ff9d4d !important; stroke-width:2.2px !important; }
+  .dot.faded { opacity:.34 !important; }
   /* Focus is everything (Sourcetrail-style): when a tile is active, unrelated ones fade back so your eye lands on "where you are" */
   .fcard.defocus { opacity:.34; filter:saturate(.55); }
   .dot.defocus { opacity:.3; }
@@ -113,13 +129,13 @@
   #blast.on { display:block; }
 
   /* Issue radar: collect every anomaly on the tree into one list; click to fly over and fix it */
-  #radar { right:22px; bottom:22px; width:280px; max-height:46vh; padding:0; display:none;
+  #radar { right:16px; bottom:16px; width:240px; max-height:32vh; padding:0; display:none;
     flex-direction:column; overflow:hidden; }
   #radar.on { display:flex; }
-  #radar .rhd { flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:11px 15px;
-    font-size:12px; letter-spacing:1px; color:var(--ink); border-bottom:1px solid rgba(120,160,220,.16); }
-  #radar .rhd .rdot { width:8px; height:8px; border-radius:50%; background:var(--red);
-    box-shadow:0 0 10px var(--red); animation:beat 1.6s ease-in-out infinite; }
+  #radar .rhd { flex:0 0 auto; display:flex; align-items:center; gap:7px; padding:8px 11px;
+    font-size:10.5px; letter-spacing:.6px; color:var(--ink); border-bottom:1px solid rgba(120,160,220,.16); }
+  #radar .rhd .rdot { width:8px; height:8px; border-radius:2px; background:var(--red);
+    box-shadow:0 0 8px var(--red); }
   #radar .rhd b { color:#fff; font-weight:700; }
   #radar .rlist { flex:1; overflow-y:auto; padding:6px; display:flex; flex-direction:column; gap:5px; }
   #radar .ritem { cursor:pointer; padding:8px 10px; border-radius:9px; border:1px solid rgba(120,160,220,.14);
@@ -135,14 +151,14 @@
     color:#04130c; background:var(--neon); border:0; box-shadow:0 8px 28px rgba(92,200,255,.35);
     opacity:0; pointer-events:none; transition:opacity .35s, transform .35s; font-weight:600; }
   #recall.on { opacity:1; transform:translateX(-50%) translateY(0); }
-  #ledger { left:22px; top:172px; width:264px; max-height:38vh; padding:0; display:none; flex-direction:column; overflow:hidden; }
+  #ledger { right:16px; left:auto; top:74px; width:236px; max-height:28vh; padding:0; display:none; flex-direction:column; overflow:hidden; opacity:.92; }
   #ledger.on { display:flex; }
-  #ledger .lhd { flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:11px 15px;
-    font-size:12px; color:#cfe0ff; border-bottom:1px solid var(--line); letter-spacing:.2px; }
+  #ledger .lhd { flex:0 0 auto; display:flex; align-items:center; gap:7px; padding:8px 11px;
+    font-size:10.5px; color:#cfe0ff; border-bottom:1px solid var(--line); letter-spacing:.2px; }
   #ledger .lhd .lhdot { width:8px; height:8px; border-radius:50%; background:var(--neon); box-shadow:0 0 8px var(--neon); }
   #ledger .lhd b { color:#fff; font-weight:700; }
-  #ledger .llist { flex:1; overflow-y:auto; padding:6px; display:flex; flex-direction:column; gap:4px; }
-  #ledger .litem { cursor:pointer; padding:7px 10px; border-radius:8px; border:1px solid rgba(120,160,220,.12);
+  #ledger .llist { flex:1; overflow-y:auto; padding:5px; display:flex; flex-direction:column; gap:4px; }
+  #ledger .litem { cursor:pointer; padding:6px 8px; border-radius:8px; border:1px solid rgba(120,160,220,.12);
     background:rgba(16,26,20,.6); display:flex; align-items:center; gap:8px; }
   #ledger .litem:hover { border-color:var(--neon); background:rgba(20,36,28,.7); }
   #ledger .litem.cur { border-color:var(--neon); }
@@ -181,7 +197,7 @@
   #cellbar .tab { cursor:pointer; font-size:12px; color:var(--ink); border-radius:7px; padding:5px 12px; user-select:none; }
   #cellbar .tab.on { background:var(--neon); color:#04130c; font-weight:650; }
   #cellbar .tab[hidden] { display:none; }
-  /* 照妖鏡 / lie monitor: flags when the AI claims work it didn't actually do */
+  /* Don't Lie To Me / lie monitor: flags when the AI claims work it didn't actually do */
   #liemon { top:56px; right:22px; width:min(360px,calc(100% - 44px)); max-height:40vh; padding:0;
     display:none; flex-direction:column; overflow:hidden; border-color:rgba(255,107,129,.45); }
   #liemon.on { display:flex; }
@@ -225,20 +241,32 @@
     <div class="brand"><span class="dot"></span> Cosmos Tree</div>
     <div class="label">Now editing</div>
     <div class="file idle" id="curFile">Not started yet</div>
-    <div class="meta" id="curMeta">Each block is a file, each line is a dependency between files. Touch a file and it lights up here. Click any block to see its code.</div>
+    <div class="meta" id="curMeta">Ready</div>
   </div>
 
   <div id="legend" class="panel">
-    <div class="row"><span class="sw" style="background:#5cc8ff;box-shadow:0 0 8px #5cc8ff"></span> Active now</div>
-    <div class="row"><span class="sw" style="background:#ffcf4d"></span> Modified</div>
-    <div class="row"><span class="sw" style="background:#ff6b81"></span> Repeated edits · anomaly</div>
-    <div class="row"><span class="sw" style="background:#7d8ca8"></span> Untouched</div>
+    <div class="line">
+      <span class="cap">狀態燈</span>
+      <span class="item"><span class="sw" style="background:#5cc8ff;box-shadow:0 0 8px #5cc8ff"></span> 正在寫 / 目前位置</span>
+      <span class="item"><span class="sw" style="background:#ffcf4d"></span> 已修改</span>
+      <span class="item"><span class="sw" style="background:#ff6b81"></span> 重複修改 / 異常</span>
+      <span class="item"><span class="sw" style="background:#7d8ca8"></span> 未動</span>
+    </div>
+    <div class="line">
+      <span class="cap">格子重要性</span>
+      <span class="item"><span class="sw" style="background:#d58cff"></span> <b>高</b> 核心 / 共用 / 爆炸範圍大</span>
+      <span class="item"><span class="sw" style="background:#66d990"></span> <b>中高</b> 主要程式 / 入口</span>
+      <span class="item"><span class="sw" style="background:#72a7ff"></span> <b>中</b> 設定 / 建置</span>
+      <span class="item"><span class="sw" style="background:#5ed7ff"></span> <b>中低</b> 素材 / 靜態檔</span>
+      <span class="item"><span class="sw" style="background:#9fb4d6"></span> <b>低</b> 文件 / 註記</span>
+      <span class="item"><span class="sw" style="background:#7d8ca8"></span> <b>低</b> 一般 / 低關聯</span>
+    </div>
   </div>
 
   <div id="conn" class="panel"><span class="dot"></span><span id="connText">Connecting…</span></div>
   <div id="recall" class="panel"></div>
   <div id="blast" class="panel"></div>
-  <div id="liemon" class="panel"><div class="lh">照妖鏡 · AI honesty</div><div id="lieList"></div></div>
+  <div id="liemon" class="panel"><div class="lh">照妖鏡 · AI 測謊</div><div id="lieList"></div></div>
 
   <div id="radar" class="panel">
     <div class="rhd"><span class="rdot"></span>Issue radar · <b id="radarCount">0</b> to review</div>
@@ -283,7 +311,7 @@
   })();
 
   const TRUNK = 168;       // Trunk length from ground to the first fork: a clear trunk first, then branches
-  const CARD_W = 210, CARD_H = 152;   // Size of each file = a code-editor window tile
+  const CARD_W = 248, CARD_H = 174;   // Size of each file = a code-editor window tile
   const svg = d3.select('#tree');
   const scene = svg.append('g');
   const gTrunk = scene.append('g');
@@ -305,7 +333,9 @@
   // ── Level of detail (LOD): small projects expand every file into a card; large repos expand only the focus area + hotspots and collapse the rest into dots ──
   // Why: a real repo has thousands of files; drawing a 210px card for each would overflow and nobody could take it all in.
   // What you actually care about is always "where you are now, where you just were, who cascades" — expand those; collapse the distant ones into leaves.
-  const LOD_THRESHOLD = 40;        // Only start collapsing once the file count exceeds this
+  const LOD_THRESHOLD = 120;       // Small projects can show full code cards everywhere; big projects need lighter boxes to stay responsive
+  const FULL_CARD_SEED = 0;        // Big-project first view is all fast snapshot boxes; click/active/error expands a card
+  const EXPANDED_LIMIT = 48;       // Hard ceiling for expensive HTML cards in a large repo
   const RECENT_KEEP = 6;           // Keep the few most recently visited tiles as cards
   const recent = [];               // Recently active paths (the trail, newest first)
   const manualExpand = new Set();  // Dots clicked open by hand → pinned as cards
@@ -321,7 +351,51 @@
     if(c.anomaly==='repeat' || c.status==='error') return COLOR.error;
     if(c.status==='modified') return COLOR.modified;
     if(c.status==='active') return COLOR.active;
-    return COLOR.idle;
+    return roleColor(c);
+  }
+  function fileRole(c){
+    const p=String(c&&c.path||'').toLowerCase();
+    if(!p) return 'normal';
+    if(c.anomaly==='repeat' || c.status==='error') return 'danger';
+    if(c.status==='modified' || c.modification_count) return 'modified';
+    if(c.status==='active' || c.draft || p===String(activePath||'').toLowerCase()) return 'active';
+    const blast = affectedBy(c.path).size;
+    if(blast>=5 || /(^|\/)(package\.json|pnpm-lock\.yaml|package-lock\.json|main\.[jt]sx?|app\.[jt]sx?|server\.[jt]s|index\.[jt]sx?|middleware\.[jt]s|router\.[jt]s|routes\.[jt]s|auth\.[jt]s|api\.[jt]s|vite\.config|webpack\.config|next\.config|electron|runner|agent|parser|stream|trace|schema|database|db|config)/i.test(p)) return 'critical';
+    if(/\.(config\.[jt]s|json|ya?ml|toml|env|ini|plist|lock)$/i.test(p)) return 'config';
+    if(/\.(md|txt|rst|adoc)$/i.test(p)) return 'doc';
+    if(/\.(png|jpe?g|gif|webp|svg|mp3|wav|mp4|mov|ttf|otf|woff2?)$/i.test(p)) return 'asset';
+    if(/(^|\/)(src|app|pages|components|core|web|cli|electron)\//i.test(p)) return 'entry';
+    return 'normal';
+  }
+  function roleColor(c){
+    switch(fileRole(c)){
+      case 'danger': return COLOR.error;
+      case 'active': return COLOR.active;
+      case 'modified': return COLOR.modified;
+      case 'critical': return '#d58cff';
+      case 'entry': return '#66d990';
+      case 'config': return '#72a7ff';
+      case 'asset': return '#5ed7ff';
+      case 'doc': return '#9fb4d6';
+      default: return COLOR.idle;
+    }
+  }
+  function roleFill(c){
+    switch(fileRole(c)){
+      case 'danger': return 'rgba(255,107,129,.16)';
+      case 'active': return 'rgba(92,200,255,.16)';
+      case 'modified': return 'rgba(255,207,77,.14)';
+      case 'critical': return 'rgba(213,140,255,.14)';
+      case 'entry': return 'rgba(102,217,144,.12)';
+      case 'config': return 'rgba(114,167,255,.12)';
+      case 'asset': return 'rgba(94,215,255,.1)';
+      case 'doc': return 'rgba(159,180,214,.1)';
+      default: return '#0e1626';
+    }
+  }
+  function roleClass(c){
+    const r=fileRole(c);
+    return r && r!=='normal' && r!=='active' && r!=='modified' && r!=='danger' ? ' '+r : '';
   }
 
   function keyOf(d){
@@ -350,12 +424,36 @@
   }
   // The real code shown inside each tile (fetch /file, cache it; when the file changes, force a re-fetch)
   const contentByPath=new Map();
+  function hasText(t){ return typeof t === 'string' && t.trim().length>0; }
+  function firstText(){
+    for(const v of arguments) if(hasText(v)) return v;
+    return '';
+  }
+  function fallbackForCell(c){
+    const meta=[];
+    if(c.language) meta.push(c.language);
+    if(c.size_lines || c.lines) meta.push((c.size_lines||c.lines)+' lines');
+    if(c.source) meta.push(c.source);
+    if(c.status && c.status!=='idle') meta.push(c.status);
+    const lines=[];
+    lines.push('// '+(c.path||'untitled'));
+    if(meta.length) lines.push('// '+meta.join(' · '));
+    if(c.category) lines.push('// '+c.category);
+    if(c.root) lines.push('// '+String(c.root).replace(/^.*?:/,''));
+    return lines.join('\n');
+  }
+  function previewForCell(c){
+    return firstText(c && c.content, c && c.preview, c && c.summary, c && c.description) || fallbackForCell(c||{});
+  }
   function fetchContent(p, cb){
     // If the file can't be read (e.g. it lives on a remote box we haven't fetched yet), show nothing rather than
     // pasting the raw "cannot read: ENOENT…" error text into the card as if it were the file's source.
-    fetch('/file?path='+encodeURIComponent(p)).then(r=> r.ok ? r.text() : '').then(t=>{ contentByPath.set(p,t); cb&&cb(t); }).catch(()=>{});
+    fetch('/file?path='+encodeURIComponent(p)).then(r=> r.ok ? r.text() : '').then(t=>{
+      if(hasText(t)) contentByPath.set(p,t);
+      cb&&cb(t||'');
+    }).catch(()=>{ cb&&cb(''); });
   }
-  function clip(t){ return (t||'').replace(/\t/g,'  ').split('\n').slice(0,16).join('\n'); }
+  function clip(t){ return (t||'').replace(/\t/g,'  ').split('\n').slice(0,10).join('\n'); }
   // Map each file path → its tile's <pre> body element, so when that file is edited we can stream the new
   // code straight into the exact tile (the "watch code get stuffed in" effect), not just snap it.
   const bdEls = new Map();
@@ -395,19 +493,79 @@
     return `M${s.x},${s.y} C${s.x},${c1y} ${t.x},${c2y} ${t.x},${t.y}`;
   }
 
-  const COL_W = CARD_W + 70;     // Horizontal spacing between cards in the same tier
-  const TIER_H = CARD_H + 160;   // Vertical spacing between tiers
-  const INDENT = 34;             // horizontal indent per folder depth (file-explorer outline)
-  const ROW_H = 46;              // vertical spacing per row (one row per file/folder)
-  const TIER_GAP = 140;          // Distance from the trunk top to the first tier
+  const INDENT = 32;             // horizontal indent per folder depth (file-explorer outline)
+  const DIR_ROW_H = 34;          // folder label rows stay compact
+  const CARD_START_X = 48;       // file cards live to the right of the folder rail, but must fit narrow side panes
+  const CARD_GAP_X = 34;         // visible air between code cards
+  const CARD_GAP_Y = 42;         // visible air between code cards
+  const SECTION_GAP = 34;        // folder sections do not collapse into each other
   let lastPlaced = null, lastEdges = [];
 
   // Nested folder tree: mirror the actual directory structure (the way a file explorer / the ASCII tree does).
   // Root at top; every folder branches down to its sub-folders and files; files are the leaves (cards/dots).
   // x = tidy in-order position over the leaves; y = directory depth. Parent→child links show the nesting.
-  const DOT_COL = 74;            // a collapsed file (dot) takes a narrow column; a card takes a wide one
+  const BOX_W = 186, BOX_H = 46; // Snapshot boxes: fast, readable headers. Full code opens only after click.
+  const MINI_BOX_W = 108, MINI_BOX_H = 30;
+  function rolePriority(c){
+    const r=fileRole(c);
+    return r==='danger'?0:r==='active'?1:r==='modified'?2:r==='critical'?3:r==='entry'?4:r==='config'?5:r==='asset'?6:r==='doc'?7:8;
+  }
+  function groupKeyForPath(p){
+    const parts=String(p||'').split('/').filter(Boolean);
+    if(!parts.length) return 'root';
+    const first=parts[0];
+    const second=parts[1];
+    const wide = /^(src|app|backend|frontend|packages|services|electron|core|web|cli|static|assets|components|pages|routes|lib|scripts|test|tests|skills)$/i.test(first);
+    if(wide && second && !/\.[A-Za-z0-9]+$/.test(second)) return first + '/' + second;
+    return first;
+  }
+  function layoutCompact(cells, exp, isCard){
+    const order = [...cells].sort((a,b)=>
+      rolePriority(a)-rolePriority(b) ||
+      groupKeyForPath(a.path).localeCompare(groupKeyForPath(b.path)) ||
+      String(a.path).localeCompare(String(b.path)));
+    const oi = new Map([...cells].sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq)).map((c,i)=>[c.id,i]));
+    const groups = new Map();
+    for(const c of order){
+      const k=groupKeyForPath(c.path);
+      if(!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(c);
+    }
+    const sectionGapX=12, sectionGapY=20;
+    const aspect=Math.max(.6, Math.min(1.8, (innerWidth||900)/(innerHeight||700)));
+    const cols=Math.max(5, Math.min(9, Math.ceil(Math.sqrt(cells.length * aspect))));
+    const colW=MINI_BOX_W;
+    const left0=CARD_START_X;
+    const root={key:'', name:projectName||'root', x:0, y:0, isDir:true, children:[]};
+    const dirs=[root], links=[], placed=[];
+    let maxDepth=1;
+    const sortedGroups=[...groups.entries()].sort((a,b)=>{
+      const pa=Math.min(...a[1].map(rolePriority)), pb=Math.min(...b[1].map(rolePriority));
+      return pa-pb || b[1].length-a[1].length || a[0].localeCompare(b[0]);
+    });
+    let y=0;
+    for(const [name, files] of sortedGroups){
+      const dir={key:'g:'+name, name, x:left0, y, isDir:true, depth:1, children:[]};
+      dirs.push(dir);
+      links.push({s:root,t:dir});
+      y += 22;
+      for(let i=0;i<files.length;i++){
+        const c=files[i];
+        const w=MINI_BOX_W, h=MINI_BOX_H;
+        const x=left0 + (i%cols)*(colW + sectionGapX);
+        const yy=y + Math.floor(i/cols)*(h + 8) + h/2;
+        const p={ cell:c, tier:1, x, y:yy, w, h, oi:oi.get(c.id)||0, compact:true };
+        placed.push(p);
+        const fileNode={key:'f:'+c.path, x:x+w/2, y:p.y, name:c.path.split('/').pop(), isDir:false, cell:c};
+        links.push({s:dir,t:fileNode});
+      }
+      y += Math.ceil(files.length/cols)*(MINI_BOX_H + 8) + sectionGapY;
+    }
+    return { placed, dirs, links, root, maxDepth };
+  }
   function layout(cells, edges, exp){
     const isCard=p=> !exp || exp.has(p);   // null exp = expand all
+    if(cells.length > LOD_THRESHOLD) return layoutCompact(cells, exp, isCard);
     const order = [...cells].sort((a,b)=>(a.born_at-b.born_at)||(a.born_seq-b.born_seq));
     const oi = new Map(order.map((c,i)=>[c.id,i]));
     // Build the directory hierarchy from the file paths.
@@ -428,18 +586,48 @@
     }
     // Sort each folder's children: sub-folders first, then files; alphabetical — stable, explorer-like.
     for(const n of nodes.values()) n.children.sort((a,b)=> (b.isDir-a.isDir) || a.name.localeCompare(b.name));
-    // Indented file-explorer / ASCII-tree shape: every folder and file gets its own ROW (pre-order, parent before
-    // its children), and indents to the right by its depth. Reads top-to-bottom exactly like `tree` output.
-    let row=0; let maxDepth=0;
+    // Folder-aware matrix: each directory gets a compact label row, then its direct files are packed into
+    // as many columns as the viewport allows. Big repos must become a map, not a mile-long receipt.
+    const compact = cells.length > LOD_THRESHOLD;
+    const usableW=Math.max(360, (innerWidth||900) - CARD_START_X - 64);
+    const gapX=compact ? 18 : CARD_GAP_X;
+    const gapY=compact ? 16 : CARD_GAP_Y;
+    let cursorY=0; let maxDepth=0;
     (function place(n){
       maxDepth=Math.max(maxDepth, n.depth);
-      n.x=n.depth*INDENT; n.y=row*ROW_H; row++;
-      n.children.forEach(place);
+      n.x=n.depth*INDENT;
+      n.y=cursorY;
+      cursorY+=DIR_ROW_H;
+      const fileKids=n.children.filter(ch=>!ch.isDir);
+      const dirKids=n.children.filter(ch=>ch.isDir);
+      if(fileKids.length){
+        const left=CARD_START_X + Math.min(n.depth, 6)*INDENT;
+        let x=left, y=cursorY + 4, rowH=0;
+        fileKids.forEach((ch,i)=>{
+          const card=isCard(ch.cell.path);
+          const w=card ? CARD_W : BOX_W;
+          const h=card ? CARD_H : BOX_H;
+          if(x>left && x+w>left+usableW){ x=left; y+=rowH+gapY; rowH=0; }
+          ch.x=x;
+          ch.y=y+h/2;
+          ch.w=w;
+          ch.h=h;
+          x+=w+gapX;
+          rowH=Math.max(rowH,h);
+          maxDepth=Math.max(maxDepth, ch.depth);
+        });
+        cursorY = y + rowH + SECTION_GAP;
+      }
+      for(const d of dirKids){
+        cursorY += fileKids.length ? 2 : 0;
+        place(d);
+      }
+      if(!fileKids.length && !dirKids.length) cursorY+=SECTION_GAP/2;
     })(root);
     const placed=[], dirs=[], links=[];
     for(const n of nodes.values()){
       if(n.key==='') { dirs.push(n); continue; }
-      if(n.isDir) dirs.push(n); else placed.push({ cell:n.cell, tier:n.depth, x:n.x, y:n.y, oi:n.oi||0 });
+      if(n.isDir) dirs.push(n); else placed.push({ cell:n.cell, tier:n.depth, x:n.x, y:n.y, w:n.w||CARD_W, h:n.h||CARD_H, oi:n.oi||0 });
     }
     // Parent→child connectors for every node (including root → its top-level entries).
     for(const n of nodes.values()) for(const ch of n.children) links.push({ s:n, t:ch });
@@ -451,7 +639,22 @@
   function render(cells, edges){
     const emptyEl=document.getElementById('empty');
     if(emptyEl) emptyEl.classList.toggle('on', !cells || !cells.length);
-    if(!cells || !cells.length) return;
+    if(!cells || !cells.length) {
+      cellByPath.clear();
+      posByPath.clear();
+      depMap = new Map();
+      lastPlaced = [];
+      lastEdges = [];
+      lastLeafCount = 0;
+      gLinks.selectAll('*').remove();
+      gTrunk.selectAll('*').remove();
+      gDots.selectAll('*').remove();
+      gNodes.selectAll('*').remove();
+      gBlast.selectAll('*').remove();
+      gFlow.selectAll('*').remove();
+      refreshRadar([]);
+      return;
+    }
     cellByPath.clear(); posByPath.clear();
     cells.forEach(c=>cellByPath.set(c.path,c));
     if(edges) lastEdges=edges;
@@ -464,8 +667,8 @@
     const exp=buildExpanded(cells);
     const { placed, dirs, links } = layout(cells, lastEdges, exp);
     lastPlaced=placed;
-    placed.forEach(p=>posByPath.set(p.cell.path,{x:p.x,y:p.y}));
-    const isExp=p=> exp===null || exp.has(p.cell.path);
+    placed.forEach(p=>posByPath.set(p.cell.path,{x:p.x+(p.w||CARD_W)/2,y:p.y}));
+    const isExp=p=> !p.compact && (exp===null || exp.has(p.cell.path));
     const placedCards=placed.filter(isExp);
     const placedDots=placed.filter(p=>!isExp(p));
     const focusSet=focusOf();
@@ -473,10 +676,11 @@
 
     // ── Parent→child connectors: right-angle elbows, like a file-explorer / `tree` outline ──
     // Drop straight down the parent's indent rail, then turn right into each child's row.
-    const lk=gLinks.selectAll('path').data(links, d=>'L:'+d.t.key);
+    const linkD = links.map(d=>`M${d.s.x},${d.s.y+9} V${d.t.y} H${d.t.x-2}`).join(' ');
+    const lk=gLinks.selectAll('path.tree-links').data(linkD ? [linkD] : []);
     lk.exit().remove();
-    lk.enter().append('path').merge(lk)
-      .attr('d',d=>`M${d.s.x},${d.s.y+9} V${d.t.y} H${d.t.x-2}`)
+    lk.enter().append('path').attr('class','tree-links').merge(lk)
+      .attr('d',d=>d)
       .attr('fill','none').attr('stroke','#33415c').attr('stroke-opacity',.8)
       .attr('stroke-linecap','round').attr('stroke-linejoin','round')
       .attr('stroke-width',1.4);
@@ -485,7 +689,8 @@
     const dn2=gTrunk.selectAll('g.dir').data(dirs, d=>'D:'+d.key);
     dn2.exit().remove();
     const den2=dn2.enter().append('g').attr('class','dir');
-    den2.append('circle').attr('class','dirc').attr('r',4).attr('fill','#26334a').attr('stroke','#5a6e92').attr('stroke-width',1.5);
+    den2.append('rect').attr('class','dirc').attr('x',-4).attr('y',-4).attr('width',8).attr('height',8).attr('rx',1.5)
+      .attr('fill','#26334a').attr('stroke','#5a6e92').attr('stroke-width',1.5);
     den2.append('text').attr('class','dirlabel').attr('text-anchor','start').attr('x',11).attr('y',4)
       .attr('fill','#9fb4d6').attr('font-size',13).attr('font-weight',600).attr('letter-spacing',.3);
     const dall2=den2.merge(dn2);
@@ -505,7 +710,7 @@
     const card=fo.append('xhtml:div').attr('class','fcard')
       // Grow in one by one: stagger the fade-in by birth order
       .style('opacity',0)
-      .style('transition',p=>`opacity .5s ease ${(p.oi||0)*55}ms, border-color .18s, box-shadow .18s, transform .18s`);
+      .style('transition',p=>`opacity .32s ease ${Math.min((p.oi||0)*12,240)}ms, border-color .18s, box-shadow .18s, transform .18s`);
     const hd=card.append('xhtml:div').attr('class','hd');
     hd.append('xhtml:span').attr('class','seq');   // Birth order number
     hd.append('xhtml:span').attr('class','st');    // one status dot (color carries real state), not fake window controls
@@ -515,8 +720,12 @@
     requestAnimationFrame(()=>ent.selectAll('div.fcard').style('opacity',1)); // Trigger the fade-in
 
     const all=ent.merge(nd);
-    all.attr('transform',p=>`translate(${p.x+CARD_W/2+16},${p.y})`); // card sits to the RIGHT of its indent rail
-    all.select('div.fcard').attr('class',p=>'fcard'+cardState(p.cell)+(p.oi===0?' first':'')+(defocused(p.cell.path)?' defocus':''));
+    all.attr('transform',p=>`translate(${p.x+(p.w||CARD_W)/2},${p.y})`); // p.x is the card's left edge
+    all.select('foreignObject')
+      .attr('width',p=>p.w||CARD_W).attr('height',p=>p.h||CARD_H)
+      .attr('x',p=>-(p.w||CARD_W)/2).attr('y',p=>-(p.h||CARD_H)/2);
+    all.select('div.fcard').attr('class',p=>'fcard'+roleClass(p.cell)+cardState(p.cell)+(p.oi===0?' first':'')+(defocused(p.cell.path)?' defocus':''));
+    all.select('div.fcard').style('width',p=>(p.w||CARD_W)+'px').style('height',p=>(p.h||CARD_H)+'px');
     all.select('.seq').text(p=>'#'+((p.oi||0)+1));
     all.select('.nm').text(p=>p.cell.path.split('/').pop());
     all.select('.badge').text(p=>cardBadge(p.cell));
@@ -524,33 +733,38 @@
       const path=p.cell.path, pre=this;
       bdEls.set(path, pre);
       if(pre._tw) return; // a stream-in animation is filling this tile right now — don't clobber it
-      if(contentByPath.has(path)) pre.textContent=clip(contentByPath.get(path));
-      else { if(!pre.textContent) pre.textContent='…'; fetchContent(path, txt=>{ if(!pre._tw) pre.textContent=clip(txt); }); }
+      const cached=contentByPath.get(path);
+      const raw = hasText(cached) && (p.cell.draft || p.cell.path===activePath || p.cell.status==='active')
+        ? cached
+        : previewForCell(p.cell);
+      pre.textContent=clip(raw);
     });
 
     // ── Each file = a small labelled BOX (not a dot) — every file is a 框框 in the nested tree ──
-    const BOX_W=176, BOX_H=34;
     const dn=gDots.selectAll('g.dot').data(placedDots, p=>'d:'+p.cell.path);
     dn.exit().remove();
     const den=dn.enter().append('g').attr('class','dot').style('cursor','pointer')
       .on('click',(e,p)=>{ manualExpand.add(p.cell.path); const um=userMoved; userMoved=true; render(lastCells); userMoved=um; openCell(p.cell.path); })
       .on('mouseenter',(e,p)=>highlightBlast(p.cell.path))
       .on('mouseleave',clearBlast);
-    den.append('rect').attr('class','filebox').attr('x',0).attr('y',-BOX_H/2).attr('width',BOX_W).attr('height',BOX_H).attr('rx',7);
-    den.append('circle').attr('class','boxdot').attr('cx',13).attr('cy',0).attr('r',4);
-    den.append('text').attr('class','boxlabel').attr('x',25).attr('y',4).attr('text-anchor','start');
+    den.append('rect').attr('class','filebox').attr('x',0).attr('rx',6);
+    den.append('rect').attr('class','boxdot').attr('x',9).attr('y',-4).attr('width',8).attr('height',8).attr('rx',1.5);
+    den.append('text').attr('class','boxlabel').attr('x',25).attr('y',-5).attr('text-anchor','start');
+    den.append('text').attr('class','boxsub').attr('x',25).attr('y',16).attr('text-anchor','start');
     const dall=den.merge(dn);
     dall.attr('class',p=>'dot'+(defocused(p.cell.path)?' defocus':''));
     dall.attr('transform',p=>`translate(${p.x},${p.y})`);
     dall.select('rect.filebox')
-      .attr('fill','#0e1626').attr('stroke',p=>statusColor(p.cell)).attr('stroke-width',1.5)
+      .attr('y',p=>-(p.h||BOX_H)/2).attr('width',p=>p.w||BOX_W).attr('height',p=>p.h||BOX_H)
+      .attr('fill',p=>roleFill(p.cell)).attr('stroke',p=>statusColor(p.cell)).attr('stroke-width',p=>fileRole(p.cell)==='normal'?1.35:1.9)
       .attr('filter',p=>(p.cell.path===activePath||p.cell.status==='active')?'url(#leafglow)':null);
-    dall.select('circle.boxdot').attr('fill',p=>statusColor(p.cell));
-    dall.select('text.boxlabel').text(p=>{ const n=p.cell.path.split('/').pop(); return n.length>20?n.slice(0,19)+'…':n; });
+    dall.select('rect.boxdot').attr('fill',p=>statusColor(p.cell));
+    dall.select('text.boxlabel').text(p=>{ const max=(p.w||BOX_W)<130?13:(p.w||BOX_W)<170?17:20; const n=p.cell.path.split('/').pop(); return n.length>max?n.slice(0,max-1)+'…':n; });
+    dall.select('text.boxsub').text(p=>trimOneLine(litePreview(p.cell), (p.w||BOX_W)<130?16:(p.w||BOX_W)<170?22:30));
 
     if(!userMoved || cells.length!==lastLeafCount){ fitToView(); }
     lastLeafCount=cells.length;
-    repaintCards();
+    repaintCards(ent);
     refreshRadar(cells);
   }
 
@@ -579,6 +793,14 @@
     return { cell:c, churn, blast, hotspot, broken, stall, why, risk };
   }
   function refreshRadar(cells){
+    if((cells||[]).length > 900){
+      const radar=document.getElementById('radar');
+      document.getElementById('radarCount').textContent='0';
+      radar.classList.remove('on');
+      const list=document.getElementById('radarList');
+      if(list) list.textContent='';
+      return;
+    }
     const probs=[];
     for(const c of (cells||[])){ const e=radarEntry(c); if(e) probs.push(e); }
     probs.sort((a,b)=> b.risk-a.risk);   // Highest risk on top
@@ -604,9 +826,13 @@
 
   // Old Chrome bug: <foreignObject> often fails to repaint once an ancestor <g> has a transform,
   // leaving cards transparent and invisible. Force-toggle display to make it recompose once.
-  function repaintCards(){
+  function repaintCards(selection){
     requestAnimationFrame(()=>{
-      for(const fo of document.querySelectorAll('foreignObject')){
+      const nodes = selection
+        ? selection.selectAll('foreignObject').nodes()
+        : Array.from(document.querySelectorAll('foreignObject'));
+      if(nodes.length > 96) return;
+      for(const fo of nodes){
         const c=fo.firstElementChild; if(!c) continue;
         c.style.display='none'; void c.offsetHeight; c.style.display='';
       }
@@ -615,6 +841,19 @@
 
   // ── Level of detail: compute the set of paths that "should expand into cards" (the rest collapse into dots) ──
   function isHotspot(c){ return (c.modification_count||0)>=HOT_CHURN && affectedBy(c.path).size>=HOT_BLAST; }
+  function trimOneLine(s, n=28){
+    const t=String(s||'').replace(/\s+/g,' ').trim();
+    return t.length>n ? t.slice(0,n-1)+'…' : t;
+  }
+  function litePreview(c){
+    const txt=previewForCell(c);
+    const body=String(txt||'').split('\n').map(l=>l.trim()).find(l=>l && !l.startsWith('// '+(c.path||'')));
+    if(body) return trimOneLine(body, 30);
+    const bits=[];
+    if(c.language) bits.push(c.language);
+    if(c.size_lines || c.lines) bits.push((c.size_lines||c.lines)+' lines');
+    return trimOneLine(bits.join(' · ') || 'preview pending', 30);
+  }
   function neighborsOf(path){            // Files directly import-linked to this tile (both directions count)
     const out=new Set();
     for(const d of (depMap.get(path)||[])) out.add(d);          // Who imports it
@@ -622,13 +861,17 @@
     return out;
   }
   function buildExpanded(cells){
-    // Indented outline: by default every file is a one-line dot (the structure), and only the files that matter
-    // right now grow into code cards — the one being written (draft), the active one, recent, hotspots, anomalies,
-    // and anything you clicked. An empty set = a clean all-dots outline (no wall of overlapping cards).
+    if(!cells || cells.length <= LOD_THRESHOLD) return null;
+    // Indented outline: every file remains a rectangular box. Only the files that matter right now grow into
+    // full HTML code cards, because thousands of foreignObject cards will lock Electron/Chrome.
     const exp=new Set(manualExpand);
-    if(activePath){ exp.add(activePath); for(const n of neighborsOf(activePath)) exp.add(n); }
-    for(let i=0;i<recent.length && i<RECENT_KEEP;i++) exp.add(recent[i]);
-    for(const c of cells) if(c.draft || isHotspot(c) || c.anomaly==='repeat' || c.anomaly==='stall' || c.status==='error') exp.add(c.path);
+    const add=(p)=>{ if(p && (exp.has(p) || exp.size < EXPANDED_LIMIT)) exp.add(p); };
+    if(activePath){ add(activePath); for(const n of neighborsOf(activePath)) add(n); }
+    for(let i=0;i<recent.length && i<RECENT_KEEP;i++) add(recent[i]);
+    for(const c of cells) if(c.draft || c.anomaly==='repeat' || c.anomaly==='stall' || c.status==='error' || c.status==='active') add(c.path);
+    const allowHotspotScan = cells.length <= 900;
+    if(allowHotspotScan) for(const c of cells) if(isHotspot(c)) add(c.path);
+    for(const c of cells.slice(0, FULL_CARD_SEED)) add(c.path);
     return exp;
   }
   // Focus ring: the active tile + its direct links + the recent trail. Everything else fades back.
@@ -640,7 +883,7 @@
   }
 
   // ── Blast radius: change one tile → which tiles get hit ──
-  let depMap=new Map();
+  let depMap=new Map(), stickyBlastPath=null;
   // Change the start tile, and every file that "directly or indirectly imports it" may break too
   function affectedBy(start){
     const seen=new Set(), q=[start];
@@ -648,7 +891,7 @@
       for(const d of (depMap.get(cur)||[])){ if(!seen.has(d)){ seen.add(d); q.push(d); } } }
     return seen;
   }
-  function highlightBlast(path){
+  function paintBlast(path){
     const aff=affectedBy(path);
     gNodes.selectAll('g.node').each(function(p){
       const card=this.querySelector('.fcard'); if(!card) return;
@@ -657,6 +900,13 @@
       if(rp===path) card.classList.add('epicenter');
       else if(aff.has(rp)) card.classList.add('atrisk');
       else card.classList.add('faded');
+    });
+    gDots.selectAll('g.dot').each(function(p){
+      this.classList.remove('epicenter','atrisk','faded');
+      const rp=p.cell.path;
+      if(rp===path) this.classList.add('epicenter');
+      else if(aff.has(rp)) this.classList.add('atrisk');
+      else this.classList.add('faded');
     });
     // Draw the dependency chain that would break (import direction: affected file → the file it depends on)
     gBlast.selectAll('*').remove();
@@ -668,39 +918,45 @@
         gBlast.append('path').attr('class','blastline').attr('d',`M${a.x},${a.y} L${b.x},${b.y}`); } }
     const name=path.split('/').pop();
     const el=document.getElementById('blast');
+    const hitNames=[...aff].slice(0,5).map(p=>p.split('/').pop()).join(', ');
     el.textContent = aff.size
-      ? `Edit ${name} → hits ${aff.size} files (the orange ones)`
+      ? `Edit ${name} → hits ${aff.size} files: ${hitNames}${aff.size>5?'…':''}`
       : `Edit ${name} → nothing imports it, relatively safe to change`;
     el.classList.add('on');
   }
+  function highlightBlast(path){ paintBlast(path); }
   function clearBlast(){
+    if(stickyBlastPath){ paintBlast(stickyBlastPath); return; }
     gNodes.selectAll('g.node').each(function(){
       const card=this.querySelector('.fcard'); if(card) card.classList.remove('epicenter','atrisk','faded'); });
+    gDots.selectAll('g.dot').each(function(){ this.classList.remove('epicenter','atrisk','faded'); });
     gBlast.selectAll('*').remove();
     document.getElementById('blast').classList.remove('on');
   }
 
-  // Don't cram the whole tree into one screen (it would shrink tiles past visibility).
-  // Scale on width alone, clamped to a readable range, with the camera anchored at the trunk base (the newest/core tier); scroll up to see higher tiers.
-  const MIN_SCALE = 0.08, MAX_SCALE = 1.0;   // allow zooming out far enough to fit a deep/wide nested tree
+  // Keep code previews readable. A big repo should extend downward/rightward; it should not be crushed into
+  // one microscopic screen where every card looks empty.
+  const MIN_SCALE = 0.72, MAX_SCALE = 1.0;
   function fitToView(){
     if(!lastPlaced || !lastPlaced.length) return;
     const xs=lastPlaced.map(p=>p.x);
     const x0=Math.min(0, Math.min(...xs))-30;                           // root rail on the left
-    const x1=Math.max(...xs)+CARD_W+200;                                // room for a card / filename label to the right
-    const y0=Math.min(0, Math.min(...lastPlaced.map(p=>p.y)))-40;       // root folder at the top (y≈0)
-    const y1=Math.max(...lastPlaced.map(p=>p.y))+CARD_H/2+40;           // deepest file at the bottom
+    const x1=Math.max(...lastPlaced.map(p=>p.x+(p.w||CARD_W)))+90;       // room for a card / filename label to the right
+    const y0=Math.min(0, Math.min(...lastPlaced.map(p=>p.y-(p.h||CARD_H)/2)))-40;
+    const y1=Math.max(...lastPlaced.map(p=>p.y+(p.h||CARD_H)/2))+90;
     if(![x0,x1,y0,y1].every(Number.isFinite)) return;
-    const pad=70;
-    const bw=Math.max(1,(x1-x0))+pad*2, bh=Math.max(1,(y1-y0))+pad*2;
-    const w=innerWidth||1280, h=innerHeight||800;
-    // Fit the WHOLE nested tree — both width and height — so the root never gets pushed off the top.
-    let s=Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(w/bw, h/bh)));
+    const pad=28;
+    const bw=Math.max(1,(x1-x0))+pad*2;
+    const bh=Math.max(1,(y1-y0))+pad*2;
+    const w=innerWidth||1280, h=innerHeight||900;
+    const overview=(lastPlaced||[]).length>LOD_THRESHOLD;
+    const minScale=overview ? 0.22 : MIN_SCALE;
+    const fit=overview ? Math.min(w/bw, Math.max(.18,(h-76)/bh)) : w/bw;
+    let s=Math.max(minScale, Math.min(MAX_SCALE, fit));
     if(!Number.isFinite(s) || s<=0) s=1; curScale=s;
-    const cx=(x0+x1)/2, cy=(y0+y1)/2;
-    const t=d3.zoomIdentity.translate(w/2 - s*cx, h/2 - s*cy).scale(s);
+    const t=d3.zoomIdentity.translate(pad - s*x0, 96 - s*y0).scale(s);
     svg.call(zoom.transform, t);
-    repaintCards();
+    if((lastPlaced||[]).length <= LOD_THRESHOLD) repaintCards();
   }
 
   function centerOn(path){
@@ -736,14 +992,6 @@
       .attr('stroke-opacity',0).attr('filter','url(#leafglow)');
     trail.transition().duration(160).attr('stroke-opacity', r.direct?.9:.5)
       .transition().delay(360).duration(560).attr('stroke-opacity',0).remove();
-    // 2) Glow ball: travels the same path to the new tile, flaring and dispersing on arrival
-    const node=trail.node(), L=node.getTotalLength();
-    const ball=gFlow.append('circle').attr('r',6)
-      .attr('fill','#d6ecff').attr('stroke','#5cc8ff').attr('stroke-width',2)
-      .attr('filter','url(#leafglow)').attr('transform',`translate(${posByPath.get(fromPath).x},${posByPath.get(fromPath).y})`);
-    ball.transition().duration(680).ease(d3.easeCubicInOut)
-      .attrTween('transform',()=> t => { const p=node.getPointAtLength(L*t); return `translate(${p.x},${p.y})`; })
-      .transition().duration(200).attr('r',11).attr('fill-opacity',0).attr('stroke-opacity',0).remove();
   }
 
   function setActive(path){
@@ -752,7 +1000,9 @@
     // Trail: record this tile at the front of the recent list (deduped, length-capped) so the focus area stays expanded into cards
     const ri=recent.indexOf(path); if(ri>=0) recent.splice(ri,1);
     recent.unshift(path); if(recent.length>RECENT_KEEP*2) recent.length=RECENT_KEEP*2;
+    stickyBlastPath=path;
     if(lastCells) { const um=userMoved; userMoved=true; render(lastCells); userMoved=um; } // Redraw the highlight without getting yanked by fit
+    paintBlast(path);
     if(prev && prev!==path) flowBall(prev, path); // Positions only exist after render, so flow the ball from the previous tile to this one
     centerOn(path);
     const c=cellByPath.get(path);
@@ -791,8 +1041,8 @@
     try{
       const r=await fetch('/file?path='+encodeURIComponent(path));
       const txt=await r.text();
-      pre.textContent=txt;
-    }catch(e){ pre.textContent='Could not read: '+e.message; }
+      pre.textContent=hasText(txt) ? txt : previewForCell(c||{path});
+    }catch(e){ pre.textContent=previewForCell(c||{path}); }
   }
   document.getElementById('tabCode').onclick=()=>showCellTab('code');
   document.getElementById('tabPrev').onclick=()=>showCellTab('preview');
@@ -836,7 +1086,7 @@
   }
   setInterval(()=>{ if(ledger.size) renderLedger(); }, 15000); // keep the relative times fresh
 
-  // 照妖鏡: render an alert when the AI claimed work the evidence doesn't back up
+  // Don't Lie To Me: render an alert when the AI claimed work the evidence doesn't back up
   const lieSeen = new Set();
   function addLieAlert(a){
     // collapse all alerts about the same promised file (or statement) into a single card — no dupes
@@ -928,6 +1178,13 @@
         if(root){ const r=root.split('/').filter(Boolean); projectName=r[r.length-1]||'Project'; }
         if(root!==draftRoot){ clearDrafts(); draftRoot=root; }  // switched project → old drafts are irrelevant
         stateCells=(m.payload&&m.payload.cells)||[];
+        const livePaths=new Set(stateCells.map(c=>c && c.path).filter(Boolean));
+        for(const d of draftMap.values()) if(d.path) livePaths.add(d.path);
+        for(const key of Array.from(contentByPath.keys())) if(!livePaths.has(key)) contentByPath.delete(key);
+        for(const c of stateCells){
+          const inline=firstText(c && c.content);
+          if(c && c.path && hasText(inline) && (c.path===activePath || manualExpand.has(c.path))) contentByPath.set(c.path, inline);
+        }
         if(m.payload&&m.payload.edges) lastEdges=m.payload.edges;
         lastCells=composeCells(); render(lastCells, lastEdges);
         // sync the ledger with any file that has been changed (covers local + remote)
@@ -953,7 +1210,8 @@
           if(!pre) return;
           const card = pre.closest('.fcard');
           if(card){ card.classList.add('writing'); clearTimeout(card._wt); card._wt=setTimeout(()=>card.classList.remove('writing'), 1800); }
-          streamInto(pre, clip(txt));
+          const target = hasText(txt) ? txt : previewForCell(cellByPath.get(path)||{path});
+          streamInto(pre, clip(target));
         });
       }
     };

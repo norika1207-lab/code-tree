@@ -6,6 +6,7 @@
 //
 // Zero install on either side: just ssh + find + cat. Uses the user's own ~/.ssh/config (aliases, keys).
 import { spawn, spawnSync } from 'node:child_process';
+import { sshControlArgs, sshControlEnv } from './ssh-control.js';
 
 // When the app is launched from Finder, this process's env is the stripped launchd env: no SSH_AUTH_SOCK
 // (ssh-agent), often a minimal PATH. So a background `spawn('ssh', …)` with BatchMode fails auth even though
@@ -67,13 +68,33 @@ function ext(p) { const b = p.slice(p.lastIndexOf('/') + 1); const i = b.lastInd
 // Resolve an import spec against the known set of remote relative paths (string-based, no disk access).
 function resolveRel(fromRel, spec, known, isPy) {
   if (isPy) {
-    if (!spec.startsWith('.')) return null;
-    const dots = spec.match(/^\.+/)[0].length;
-    const rest = spec.slice(dots).replace(/\./g, '/');
-    let dir = dirname(fromRel);
-    for (let i = 1; i < dots; i++) dir = dirname(dir);
-    const base = normalize(dir + '/' + rest);
-    for (const cand of [base + '.py', base + '/__init__.py']) if (known.has(cand)) return cand;
+    const tryBase = (base) => {
+      for (const cand of [base + '.py', base + '/__init__.py']) if (known.has(cand)) return cand;
+      return null;
+    };
+    if (spec.startsWith('.')) {
+      const dots = spec.match(/^\.+/)[0].length;
+      const rest = spec.slice(dots).replace(/\./g, '/');
+      let dir = dirname(fromRel);
+      for (let i = 1; i < dots; i++) dir = dirname(dir);
+      return tryBase(normalize(dir + '/' + rest));
+    }
+    // Many deployed Python apps put a package dir such as backend/ on PYTHONPATH. Resolve bare/package
+    // imports from the current folder upward, then common source folders, so the remote tree has lines.
+    const rel = spec.replace(/\./g, '/');
+    const bases = [];
+    const seen = new Set();
+    const push = (base) => { base = normalize(base); if (!seen.has(base)) { seen.add(base); bases.push(base); } };
+    for (let dir = dirname(fromRel); ; dir = dirname(dir)) {
+      push(dir ? `${dir}/${rel}` : rel);
+      if (!dir) break;
+    }
+    push(rel);
+    for (const d of ['src', 'lib', 'app', 'backend', 'server', 'core']) push(`${d}/${rel}`);
+    for (const base of bases) {
+      const resolved = tryBase(base);
+      if (resolved) return resolved;
+    }
     return null;
   }
   if (!(spec.startsWith('.') || spec.startsWith('/'))) return null;
@@ -96,7 +117,10 @@ function importsOf(rel, content, known) {
 
 function sh(host, remoteCmd, { timeoutMs = 20000 } = {}) {
   return new Promise((resolve) => {
-    const p = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, remoteCmd], { stdio: ['ignore', 'pipe', 'pipe'], env: loginEnv() });
+    const p = spawn('ssh', [...sshControlArgs({ batch: true }), host, remoteCmd], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...loginEnv(), ...sshControlEnv() },
+    });
     let out = '', err = '';
     const t = setTimeout(() => { try { p.kill(); } catch {} resolve({ ok: false, out, err: 'timeout' }); }, timeoutMs);
     p.stdout.on('data', (d) => (out += d));
@@ -114,19 +138,19 @@ const PRUNE = ['node_modules', '.git', '.venv', 'venv', 'env', '.env', 'site-pac
 
 function findExpr() {
   const exprs = CODE_EXT.map((e) => `-name '*.${e}'`).join(' -o ');
-  const prune = PRUNE.map((d) => `-not -path '*/${d}/*'`).join(' ');
-  return `find . -type f \\( ${exprs} \\) ${prune} 2>/dev/null`;
+  const prune = PRUNE.map((d) => `-path './${d}' -o -path '*/${d}'`).join(' -o ');
+  return `find . \\( ${prune} \\) -prune -o -type f \\( ${exprs} \\)`;
 }
 // Phase 1 — LIST only: every code file + mtime in ONE find (-printf), no per-file stat fork. Fast even on big
 // repos, so the tree paints in ~2s. mtime drives the camera-jump diff.
 function buildListCmd(root) {
-  return `cd ${JSON.stringify(root)} 2>/dev/null && ${findExpr()} -printf '${LIST_MARK}%p\\t%T@\\n' | head -${MAX_FILES}`;
+  return `cd ${JSON.stringify(root)} 2>/dev/null && ${findExpr()} -printf '${LIST_MARK}%p\\t%T@\\n' 2>/dev/null | head -${MAX_FILES}`;
 }
 // Phase 2 — CONTENT of the first CONTENT_CAP files (for import edges + card previews). Runs after the tree is
 // already on screen, so a slow/huge repo never blocks the first paint.
 function buildContentCmd(root) {
-  return `cd ${JSON.stringify(root)} 2>/dev/null && ${findExpr()} | head -${CONTENT_CAP} | ` +
-    `while IFS= read -r f; do printf '%s%s\\n' '${MARK}' "$f"; cat "$f" 2>/dev/null; done`;
+  return `cd ${JSON.stringify(root)} 2>/dev/null && ${findExpr()} -print 2>/dev/null | head -${CONTENT_CAP} | ` +
+    `while IFS= read -r f; do printf '%s%s\\n' '${MARK}' "$f"; head -c 4096 "$f" 2>/dev/null; printf '\\n'; done`;
 }
 
 // Phase 1 output: LIST_MARK<rel>\t<mtime> lines → [{ rel, mtime }]
@@ -155,8 +179,34 @@ function parseContent(raw) {
   return out;
 }
 
+function previewOfContent(content) {
+  return String(content || '').replace(/\t/g, '  ').split('\n').slice(0, 10).join('\n');
+}
+
+export async function findRemoteProject(host, name) {
+  const clean = String(name || '').trim().replace(/['"]/g, '');
+  if (!host || !clean) return null;
+  const q = clean.toLowerCase();
+  const cmd = `for base in /opt /home /var/www /srv /root; do [ -d "$base" ] || continue; find "$base" -maxdepth 5 \\( -name .git -o -name node_modules -o -name .venv -o -name venv -o -name __pycache__ \\) -prune -o -type d \\( -iname "*${q}*" \\) -print 2>/dev/null; done | head -80`;
+  const res = await sh(host, cmd, { timeoutMs: 15000 });
+  if (!res.ok) return null;
+  const dirs = res.out.split('\n').map((s) => s.trim()).filter(Boolean);
+  if (!dirs.length) return null;
+  const score = (d) => {
+    const b = d.split('/').filter(Boolean).pop()?.toLowerCase() || '';
+    let n = 0;
+    if (b === q) n += 1000;
+    if (d.toLowerCase().includes(`/opt/${q}`)) n += 300;
+    n -= d.split('/').length * 5;
+    return n;
+  };
+  dirs.sort((a, b) => score(b) - score(a));
+  return dirs[0] || null;
+}
+
 export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, onStatus }) {
   let timer = null, lastMtime = new Map(), firstOk = false, stopped = false;
+  let scanning = false;
   let content = new Map(); // rel → file content from the latest scan, so the web server can serve card previews
   let baseline = new Map(); // rel → content at the FIRST scan, for remote "revert to session start"
 
@@ -184,6 +234,7 @@ export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, 
         id: f.rel, path: f.rel,
         language: LANG[ext(f.rel)] || ext(f.rel) || 'txt',
         size_lines: c ? c.split('\n').length : 0,
+        preview: previewOfContent(c),
         category: slash > 0 ? f.rel.slice(0, slash) : 'root',
         status: changed ? 'modified' : 'idle',
         modification_count: changed ? 1 : 0,
@@ -197,24 +248,29 @@ export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, 
   }
 
   async function scan() {
-    if (stopped) return;
-    // ---- Phase 1: list (fast) → paint the tree immediately, even on a huge repo ----
-    const listRes = await sh(host, buildListCmd(root), { timeoutMs: 20000 });
-    if (stopped) return;
-    if (!listRes.ok) { onStatus?.({ ok: false, error: listRes.err || 'ssh failed', host, root }); return; }
-    const files = parseList(listRes.out);
-    if (!files.length) { if (!firstOk) onStatus?.({ ok: false, error: 'no code files found (check the path)', host, root }); return; }
-    const changedPaths = diffChanges(files);
-    const changedSet = new Set(changedPaths.map((c) => c.path));
-    onStatus?.({ ok: true, host, root, files: files.length });
-    onSnapshot?.(buildSnapshot(files, changedSet)); // tree on screen now (no content yet)
-    firstOk = true;
-    // ---- Phase 2: content of the first CONTENT_CAP files → import edges + previews, then repaint ----
-    const cRes = await sh(host, buildContentCmd(root), { timeoutMs: 45000 });
-    if (stopped || !cRes.ok) return; // tree already shown; a content failure just means no edges this round
-    content = parseContent(cRes.out);
-    if (!baseline.size) baseline = new Map(content); // first content scan = "session start" for revert
-    onSnapshot?.(buildSnapshot(files, changedSet)); // same files+changes, now enriched with content/edges
+    if (stopped || scanning) return;
+    scanning = true;
+    try {
+      // ---- Phase 1: list (fast) → paint the tree immediately, even on a huge repo ----
+      const listRes = await sh(host, buildListCmd(root), { timeoutMs: 20000 });
+      if (stopped) return;
+      if (!listRes.ok) { onStatus?.({ ok: false, error: listRes.err || 'ssh failed', host, root }); return; }
+      const files = parseList(listRes.out);
+      if (!files.length) { if (!firstOk) onStatus?.({ ok: false, error: 'no code files found (check the path)', host, root }); return; }
+      const changedPaths = diffChanges(files);
+      const changedSet = new Set(changedPaths.map((c) => c.path));
+      onStatus?.({ ok: true, host, root, files: files.length });
+      onSnapshot?.(buildSnapshot(files, changedSet)); // tree on screen now (no content yet)
+      firstOk = true;
+      // ---- Phase 2: content of the first CONTENT_CAP files → import edges + previews, then repaint ----
+      const cRes = await sh(host, buildContentCmd(root), { timeoutMs: 45000 });
+      if (stopped || !cRes.ok) return; // tree already shown; a content failure just means no edges this round
+      content = parseContent(cRes.out);
+      if (!baseline.size) baseline = new Map(content); // first content scan = "session start" for revert
+      onSnapshot?.(buildSnapshot(files, changedSet)); // same files+changes, now enriched with content/edges
+    } finally {
+      scanning = false;
+    }
   }
 
   return {
@@ -228,7 +284,10 @@ export function createRemoteSource({ host, root, intervalMs = 5000, onSnapshot, 
       return new Promise((resolve) => {
         if (!baseline.has(rel)) return resolve({ ok: false, err: 'no session-start snapshot' });
         const abs = `${root.replace(/\/$/, '')}/${rel}`;
-        const p = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, `cat > ${JSON.stringify(abs)}`], { stdio: ['pipe', 'ignore', 'pipe'], env: loginEnv() });
+        const p = spawn('ssh', [...sshControlArgs({ batch: true }), host, `cat > ${JSON.stringify(abs)}`], {
+          stdio: ['pipe', 'ignore', 'pipe'],
+          env: { ...loginEnv(), ...sshControlEnv() },
+        });
         let err = '';
         p.stderr.on('data', (d) => (err += d));
         p.on('error', (e) => resolve({ ok: false, err: e.message }));

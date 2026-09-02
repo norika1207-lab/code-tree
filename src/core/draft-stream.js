@@ -78,7 +78,14 @@ export function createDraftStream(emit) {
       }
       if (buf.length > 8000) buf = buf.slice(-8000);
     },
-    // flush a trailing partial line (e.g. agent paused mid-line) so live code isn't a line behind.
-    tick() { if (inFence && buf && !buf.includes('\n')) { codeLines.push(buf); pushCode(); codeLines.pop(); } },
+    // Flush a trailing partial line (e.g. agent paused mid-line) so live code isn't a line behind.
+    // This is how "every chunk the AI is typing right now" reaches the draft card before Enter/newline.
+    tick() {
+      if ((inFence || inHeredoc) && buf && !buf.includes('\n')) {
+        codeLines.push(buf);
+        pushCode();
+        codeLines.pop();
+      }
+    },
   };
 }

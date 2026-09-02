@@ -1,0 +1,79 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>layout test</title>
+<script src="/vendor/d3.min.js"></script>
+<style>
+body{margin:0;background:#0a0e16;color:#cfe;font-family:-apple-system,monospace;font-size:12px}
+#info{padding:8px;border-bottom:1px solid #234}
+#out{padding:8px}
+svg{display:block;background:#060a12}
+.box{fill:#1b2535;stroke:#5cc8ff;stroke-width:1}
+.label{fill:#cfe0ff;font-size:11px}
+.link{fill:none;stroke:#33415c;stroke-width:1.2}
+.dir{fill:#26334a;stroke:#5a6e92}
+.dirlabel{fill:#9fb4d6;font-size:13;font-weight:600}
+</style></head>
+<body>
+<div id="info"></div>
+<svg id="svg" width="100%" height="900"><g id="scene"></g></svg>
+<div id="out"></div>
+<script>
+const BOX_W=186, BOX_H=46, CARD_START_X=48;
+function getCells(){
+  return new Promise((resolve)=>{
+    const ws=new WebSocket('ws://localhost:'+(window.__WS_PORT__||7778));
+    ws.onmessage=(ev)=>{
+      try{const m=JSON.parse(ev.data); const c=m.payload&&m.payload.cells; if(c){ws.close();resolve(c);}}catch{}
+    };
+    setTimeout(()=>resolve([]),5000);
+  });
+}
+getCells().then(cells=>{
+  const info=document.getElementById('info');
+  info.innerHTML='cells='+cells.length+'  d3.tree='+(typeof d3.tree)+'  d3.hierarchy='+(typeof d3.hierarchy);
+  const rootData={key:'',name:'root',isDir:true,depth:0,children:[],_byKey:new Map()};
+  function ensureDir(parent,key,name,depth){let n=parent._byKey.get(key);if(!n){n={key,name,isDir:true,depth,children:[],_byKey:new Map()};parent._byKey.set(key,n);parent.children.push(n);}return n;}
+  for(const c of cells){
+    const parts=String(c.path).split('/').filter(Boolean);
+    let parent=rootData,parentKey='';
+    for(let i=0;i<parts.length-1;i++){const k=(parentKey?parentKey+'/':'')+parts[i];parent=ensureDir(parent,k,parts[i],i+1);parentKey=k;}
+    const fileKey=(parentKey?parentKey+'/':'')+parts[parts.length-1];
+    parent.children.push({key:fileKey,name:parts[parts.length-1],isDir:false,depth:parts.length,cell:c});
+  }
+  (function sortAll(n){if(!n.children)return;n.children.sort((a,b)=>(b.isDir-a.isDir)||a.name.localeCompare(b.name));for(const ch of n.children)sortAll(ch);})(rootData);
+  const h=d3.hierarchy(rootData);
+  const xGap=BOX_W+30,yGap=BOX_H+60;
+  d3.tree().nodeSize([xGap,yGap]).separation((a,b)=>a.parent===b.parent?1:1.35)(h);
+  let minX=Infinity;h.each(n=>{if(n.x<minX)minX=n.x;});
+  const shift=(isFinite(minX)?-minX:0)+CARD_START_X;
+  const xs=[],ys=[];
+  const scene=d3.select('#scene');
+  h.descendants().forEach(node=>{
+    if(!node.parent)return;
+    const sx=node.parent.x+shift,sy=node.parent.y,tx=node.x+shift,ty=node.y;
+    const my=(sy+ty)/2;
+    scene.append('path').attr('class','link').attr('d',`M${sx},${sy} C${sx},${my} ${tx},${my} ${tx},${ty}`);
+  });
+  h.each(node=>{
+    const cx=node.x+shift,cy=node.y;
+    xs.push(cx);ys.push(cy);
+    if(node.data.isDir){
+      const g=scene.append('g').attr('transform',`translate(${cx},${cy})`);
+      g.append('rect').attr('class','dir').attr('x',-5).attr('y',-5).attr('width',10).attr('height',10);
+      g.append('text').attr('class','dirlabel').attr('x',11).attr('y',5).text(node.data.name+'/');
+    } else {
+      const g=scene.append('g').attr('transform',`translate(${cx-BOX_W/2},${cy-BOX_H/2})`);
+      g.append('rect').attr('class','box').attr('width',BOX_W).attr('height',BOX_H).attr('rx',4);
+      g.append('text').attr('class','label').attr('x',8).attr('y',18).text(node.data.cell.path.split('/').pop());
+    }
+  });
+  const minXShown=Math.min(...xs),maxXShown=Math.max(...xs);
+  const minYShown=Math.min(...ys),maxYShown=Math.max(...ys);
+  info.innerHTML+='<br>x range: ['+minXShown.toFixed(0)+', '+maxXShown.toFixed(0)+'] span='+(maxXShown-minXShown).toFixed(0);
+  info.innerHTML+='<br>y range: ['+minYShown.toFixed(0)+', '+maxYShown.toFixed(0)+'] span='+(maxYShown-minYShown).toFixed(0);
+  info.innerHTML+='<br>unique x values: '+(new Set(xs.map(v=>Math.round(v)))).size;
+  // Auto-fit
+  const w=window.innerWidth-20,svg=document.getElementById('svg');
+  svg.setAttribute('viewBox',`${minXShown-BOX_W} ${minYShown-30} ${maxXShown-minXShown+BOX_W*2} ${maxYShown-minYShown+90}`);
+  svg.setAttribute('height',Math.min(900, (maxYShown-minYShown+90)*(w/(maxXShown-minXShown+BOX_W*2))));
+});
+</script></body></html>

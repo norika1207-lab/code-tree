@@ -29,12 +29,14 @@ export function createRoutedAgent({
   };
 
   const tiers = [{ name: 'local' }, { name: 'claude' }];
+  let currentAgent = null;
 
   const buildAgent = (tier) => {
     if (tier.name === 'local') {
       const llm = createLocalLLM({ baseURL, model: localModel || 'qwen-coder' });
       const memory = createMemory({ root, model: localModel || 'qwen-coder' });
-      return createAgent({ llm, root, emit, onEvent: filteredEvent, systemSuffix, memory });
+      currentAgent = createAgent({ llm, root, emit, onEvent: filteredEvent, systemSuffix, memory });
+      return currentAgent;
     }
     // claude SDK: wrap a layer so the router gets the right outcome shape.
     // since the SDK doesn't return an outcome directly, use "no error event the whole run" as the clean-finish signal.
@@ -44,13 +46,15 @@ export function createRoutedAgent({
       filteredEvent(e);
     };
     const sdk = createSdkAgent({ root, model, emit, onEvent: sdkOnEvent, ...sdkOpts });
-    return {
+    currentAgent = {
       async send(task) {
         try { await sdk.send(task); }
         catch (e) { return { ok: false, error: e.message, confTrace: [] }; }
         return { ok: !errored, verifyPassed: null, filesModified: [], confTrace: [] };
       },
+      cancel() { try { sdk.cancel?.(); } catch {} },
     };
+    return currentAgent;
   };
 
   const router = createRouter({
@@ -75,6 +79,9 @@ export function createRoutedAgent({
         onEvent({ type: 'turn_end' });
         return { solved: false, error: e.message };
       }
+    },
+    cancel() {
+      try { currentAgent?.cancel?.(); } catch {}
     },
   };
 }

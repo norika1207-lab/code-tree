@@ -1,13 +1,21 @@
 // Electron shell: wraps core (file watcher + WS + agent runner) and the visual editor (cosmos.html)
 // into a double-click-to-open desktop app. No terminal, no npm.
 // Startup flow: pick a project folder → start core inside the app → open a window loading the world-tree canvas.
-import { app, BrowserWindow, dialog, Menu, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, Menu, shell, ipcMain, session } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { startCore } from '../src/core/server.js';
 import { startBragi, stopBragi } from './bragi.js';
+
+// Code Tree does not store browser passwords or app secrets in Chromium storage.
+// Without this, Electron/Chromium may ask macOS Keychain for "code-tree Safe Storage"
+// on every launch, especially while the app is being rebuilt and ad-hoc signed.
+if (process.platform === 'darwin') {
+  app.commandLine.appendSwitch('use-mock-keychain');
+}
+app.commandLine.appendSwitch('password-store', 'basic');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PREF = path.join(app.getPath('userData'), 'prefs.json');
@@ -27,6 +35,15 @@ console.error = (...a) => logln('[core:err]', ...a.map(String));
 
 let core = null;
 let win = null;
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+app.on('second-instance', () => {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
 
 // Remember the last opened project so we can go straight in next time
 function loadPrefs() {
@@ -59,8 +76,21 @@ function isSafeRoot(p) {
   return true;
 }
 
+// Looks like a real project: has a marker file OR a top-level src/. Used to decide whether process.cwd() is
+// worth opening as the root. Mirrors looksLikeProject in core/server.js, intentionally narrower (we want a
+// strong signal at startup; cwd-follow handles the runtime cd's later).
+function looksLikeProject(dir) {
+  try {
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return false;
+    const markers = ['.git', 'package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'requirements.txt', 'tsconfig.json', 'pom.xml', 'Gemfile', 'composer.json', 'setup.py'];
+    for (const m of markers) if (fs.existsSync(path.join(dir, m))) return true;
+    return fs.existsSync(path.join(dir, 'src'));
+  } catch { return false; }
+}
+
 function scratchRoot() {
   const dir = path.join(app.getPath('userData'), 'no-project');
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return dir;
 }
@@ -99,6 +129,24 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
+function installPermissionPolicy() {
+  const denied = new Set([
+    'camera',
+    'microphone',
+    'media',
+    'audioCapture',
+    'videoCapture',
+    'bluetooth',
+    'midi',
+    'midiSysex',
+    'geolocation',
+    'notifications',
+  ]);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(!denied.has(permission));
+  });
+}
+
 function openProjectFlow(root, opts = {}) {
   const c = startOn(root, opts);
   if (!win) createWindow();
@@ -108,7 +156,8 @@ function openProjectFlow(root, opts = {}) {
 
 // No project, just a terminal: the terminal opens in the home directory, and the visualization stays empty until you touch a file.
 function openNoProject() {
-  openProjectFlow(scratchRoot(), { terminalCwd: os.homedir(), label: 'No project', noProject: true, remember: false });
+  const scratch = scratchRoot();
+  openProjectFlow(scratch, { terminalCwd: scratch, label: 'No project', noProject: true, remember: false });
 }
 
 // Remote project over ssh: map a codebase that lives on another machine. `spec` is host:/path or ssh://host/path.
@@ -194,27 +243,35 @@ function buildMenu() {
 }
 
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   logln('app ready, userData=', app.getPath('userData'));
   // The in-app agent uses a cloud model (Claude via the borrowed Claude Code login by default). The bundled
   // on-device model is disabled — keep the app small and rely on a real cloud LLM. (startBragi left importable
   // for users who still run the local stack manually via the `bragi` command.)
   void startBragi;
   buildMenu();
+  installPermissionPolicy();
   createWindow();
   // show a welcome screen first to avoid a blank window
   win.loadFile(path.join(__dirname, 'welcome.html'));
   const prefs = loadPrefs();
   // Priority for auto-loading a project at startup:
-  //   1. env (the current dir passed in by the `codetree [dir]` launcher)
-  //   2. the last opened project (if its path still exists)
-  //   3. pop the picker and let the user choose (won't silently drop into an empty scratch; the right-side tree must have something growing)
-  // Rule: never silently enter no-project mode at startup. No-project is a state you enter only when "the user explicitly clicks the button",
-  // not a fallback. An empty scratch folder has no cells, so the right side is always blank and looks like the product is broken.
+  //   1. env CODE_TREE_ROOT (set by the `codetree [dir]` launcher)
+  //   2. process.cwd() when it's safe AND looks like a project — covers `npm run app`, `electron .`, IDE-launched dev runs.
+  //      The point: open the project the user is sitting in, not whatever they opened last week.
+  //   3. prefs.lastProject (if still exists) — for double-click-from-Finder, where cwd is '/'
+  //   4. no-project follow mode (terminal in home, tree grows when you cd into a project)
+  // Rule: never silently enter no-project mode at startup if any of the above is available. An empty scratch folder
+  // has no cells, so the right side stays blank and looks like the product is broken.
   const envRoot = process.env.CODE_TREE_ROOT;
+  const cwdRoot = process.cwd();
+  const cwdLooksGood = isSafeRoot(cwdRoot) && looksLikeProject(cwdRoot);
   let root = envRoot && fs.existsSync(envRoot) ? envRoot
-    : (prefs.lastProject && fs.existsSync(prefs.lastProject) ? prefs.lastProject : null);
+    : (cwdLooksGood ? cwdRoot
+    : (prefs.lastProject && fs.existsSync(prefs.lastProject) ? prefs.lastProject : null));
   // Drop an over-broad remembered root (e.g. the home dir) so we never reopen into a watcher-saturating hang.
   if (root && !isSafeRoot(root)) { logln('ignoring over-broad lastProject root:', root); savePrefs({}); root = null; }
+  logln('startup root pick:', root || '(none)', '| env=', envRoot || '-', 'cwd-good=', cwdLooksGood, 'lastProject=', prefs.lastProject || '-');
   if (root) { openProjectFlow(root); return; }
   // First run / no remembered project: do NOT wall the user behind a native picker (that's a button, and it kept
   // dropping people into the empty no-project scratch → a permanently blank tree). Open straight into follow mode:
