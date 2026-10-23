@@ -157,3 +157,7 @@ Paper (Bragi method, ablations): [doi:10.5281/zenodo.20557449](https://doi.org/1
 ## License
 
 MIT © norika
+
+---
+
+Author: Norika Oda (織田紀香) · https://norika.tw
